@@ -1,3 +1,4 @@
+// 8086 instruction decoder
 const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
@@ -56,6 +57,9 @@ const Instruction = struct {
             instruction.rm = @truncate(modregrm & 0x07);
         }
 
+        // MOV immediate to register (1011wreg)
+        if (bytes[0] & 0xF0 == 0xB0) {}
+
         return instruction;
     }
 
@@ -102,7 +106,7 @@ pub fn decodeInstructions(binaryInstructions: []const u8, allocator: Allocator) 
 }
 
 pub fn formatInstructions(instructions: []const Instruction, writer: anytype) !void {
-    try writer.writeAll("bits 16\n\n");
+    try writer.writeAll("bits 16\n");
     for (instructions) |instruction| {
         try instruction.format("", .{}, writer);
         try writer.writeByte('\n');
@@ -113,7 +117,6 @@ test "MOV reg, reg/mem pattern single instruction" {
     var buffer = [_]u8{ 0b10001001, 0b11011001 };
     const expected =
         \\bits 16
-        \\
         \\mov cx, bx
         \\
     ;
@@ -131,7 +134,6 @@ test "MOV reg, reg/mem pattern multiple instructions" {
     var buffer = [_]u8{ 0b10001001, 0b11011001, 0b10001000, 0b11100101, 0b10001001, 0b11011010, 0b10001001, 0b11011110, 0b10001001, 0b11111011, 0b10001000, 0b11001000, 0b10001000, 0b11101101, 0b10001001, 0b11000011, 0b10001001, 0b11110011, 0b10001001, 0b11111100, 0b10001001, 0b11000101 };
     const expected =
         \\bits 16
-        \\
         \\mov cx, bx
         \\mov ch, ah
         \\mov dx, bx
@@ -155,6 +157,8 @@ test "MOV reg, reg/mem pattern multiple instructions" {
 
     try testing.expectEqualStrings(expected, actual.items);
 }
+
+test "More MOVs (including immediate to register)" {}
 
 test "invalid binary length" {
     var buffer = [_]u8{0b10001001};

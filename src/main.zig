@@ -1,5 +1,5 @@
 const std = @import("std");
-const ce = @import("root.zig");
+const decoder = @import("decoder.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
 
@@ -9,7 +9,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const file = std.fs.cwd().openFile("asm/single_register_mov", .{ .mode = .read_only }) catch |err| {
+    const file = std.fs.cwd().openFile("asm/many_register_mov", .{ .mode = .read_only }) catch |err| {
         std.debug.print("Failed to open file: {s}\n", .{@errorName(err)});
         return;
     };
@@ -19,9 +19,9 @@ pub fn main() !void {
     const buffer = try allocator.alloc(u8, fileSize);
     _ = try file.read(buffer);
 
-    const asmInstructions = try ce.decodeInstructions(buffer, allocator);
+    const asmInstructions = try decoder.decodeInstructions(buffer, allocator);
     defer allocator.free(asmInstructions);
 
     const writer = std.io.getStdOut().writer();
-    try ce.formatInstructions(asmInstructions, writer);
+    try decoder.formatInstructions(asmInstructions, writer);
 }
