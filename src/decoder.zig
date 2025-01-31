@@ -40,25 +40,28 @@ const Instruction = struct {
     mod: u2, // mode
     reg: u3, // register
     rm: u3, // register/memory
+    consumedBytes: usize,
 
-    pub fn decode(bytes: []const u8) !Instruction {
-        assert(bytes.len == 2);
-        var instruction = Instruction{ .op = .invalid, .d = 0, .w = 0, .mod = 0b00, .reg = 0b000, .rm = 0b000 };
+    pub fn decode(bytes: []const u8, startIndex: usize) !Instruction {
+        var instruction = Instruction{ .op = .invalid, .d = 0, .w = 0, .mod = 0b00, .reg = 0b000, .rm = 0b000, .consumedBytes = 0 };
 
         // MOV reg, reg/mem pattern (100010dw)
-        if (bytes[0] & 0xFC == 0x88) {
+        if (bytes[startIndex] & 0xFC == 0x88) {
+            const opcodedw = bytes[startIndex];
             instruction.op = .mov;
-            instruction.d = if (bytes[0] & 0x02 == 0) 0 else 1;
-            instruction.w = if (bytes[0] & 0x01 == 0) 0 else 1;
+            instruction.d = if (opcodedw & 0x02 == 0) 0 else 1;
+            instruction.w = if (opcodedw & 0x01 == 0) 0 else 1;
 
-            const modregrm = bytes[1];
+            const modregrm = bytes[startIndex + 1];
             instruction.mod = @truncate(modregrm >> 6);
             instruction.reg = @truncate((modregrm & 0x38) >> 3);
             instruction.rm = @truncate(modregrm & 0x07);
+
+            instruction.consumedBytes = 2;
         }
 
         // MOV immediate to register (1011wreg)
-        if (bytes[0] & 0xF0 == 0xB0) {}
+        if (bytes[startIndex] & 0xF0 == 0xB0) {}
 
         return instruction;
     }
@@ -87,20 +90,14 @@ const Instruction = struct {
     }
 };
 
-pub fn decodeInstructions(binaryInstructions: []const u8, allocator: Allocator) ![]Instruction {
-    if (binaryInstructions.len % 2 != 0) {
-        // Each instruction is 16 bits,
-        // so we cannot have an odd number of elements in the array
-        return error.InvalidBinaryLength;
-    }
-
-    const decodedInstructions: []Instruction = try allocator.alloc(Instruction, binaryInstructions.len / 2);
+pub fn decodeInstructions(binaryInstructions: []const u8, allocator: Allocator) !ArrayList(Instruction) {
+    var decodedInstructions = ArrayList(Instruction).init(allocator);
 
     var i: usize = 0;
     while (i < binaryInstructions.len) {
-        const instruction = try Instruction.decode(binaryInstructions[i .. i + 2]);
-        decodedInstructions[i / 2] = instruction;
-        i += 2;
+        const instruction = try Instruction.decode(binaryInstructions, i);
+        try decodedInstructions.append(instruction);
+        i += instruction.consumedBytes;
     }
     return decodedInstructions;
 }
@@ -121,11 +118,11 @@ test "MOV reg, reg/mem pattern single instruction" {
         \\
     ;
     const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
-    defer testing.allocator.free(decodedInstructions);
+    defer decodedInstructions.deinit();
 
     var actual = ArrayList(u8).init(testing.allocator);
     defer actual.deinit();
-    try formatInstructions(decodedInstructions, actual.writer());
+    try formatInstructions(decodedInstructions.items, actual.writer());
 
     try testing.expectEqualStrings(expected, actual.items);
 }
@@ -149,19 +146,13 @@ test "MOV reg, reg/mem pattern multiple instructions" {
     ;
 
     const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
-    defer testing.allocator.free(decodedInstructions);
+    defer decodedInstructions.deinit();
 
     var actual = ArrayList(u8).init(testing.allocator);
     defer actual.deinit();
-    try formatInstructions(decodedInstructions, actual.writer());
+    try formatInstructions(decodedInstructions.items, actual.writer());
 
     try testing.expectEqualStrings(expected, actual.items);
 }
 
 test "More MOVs (including immediate to register)" {}
-
-test "invalid binary length" {
-    var buffer = [_]u8{0b10001001};
-    const decodedInstructions = decodeInstructions(buffer[0..buffer.len], testing.allocator);
-    try testing.expectError(error.InvalidBinaryLength, decodedInstructions);
-}

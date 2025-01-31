@@ -19,9 +19,9 @@ pub fn main() !void {
     const buffer = try allocator.alloc(u8, fileSize);
     _ = try file.read(buffer);
 
-    const asmInstructions = try decoder.decodeInstructions(buffer, allocator);
-    defer allocator.free(asmInstructions);
+    const decodedInstructions = try decoder.decodeInstructions(buffer, allocator);
+    defer decodedInstructions.deinit();
 
     const writer = std.io.getStdOut().writer();
-    try decoder.formatInstructions(asmInstructions, writer);
+    try decoder.formatInstructions(decodedInstructions.items, writer);
 }
