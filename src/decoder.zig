@@ -41,10 +41,21 @@ const Instruction = struct {
     reg: u3, // register
     rm: u3, // register/memory
     displacement: ?u16, // displacement
+    immediate: ?u16, // data
     consumedBytes: usize,
 
     pub fn decode(bytes: []const u8, startIndex: usize) !Instruction {
-        var instruction = Instruction{ .op = .invalid, .d = 0, .w = 0, .mod = 0b00, .reg = 0b000, .rm = 0b000, .displacement = undefined, .consumedBytes = 0 };
+        var instruction = Instruction{
+            .op = .invalid,
+            .d = 0,
+            .w = 0,
+            .mod = 0b00,
+            .reg = 0b000,
+            .rm = 0b000,
+            .displacement = undefined,
+            .immediate = undefined,
+            .consumedBytes = 0,
+        };
 
         // MOV reg, reg/mem pattern (100010dw)
         if (bytes[startIndex] & 0xFC == 0x88) {
@@ -58,34 +69,69 @@ const Instruction = struct {
             instruction.reg = @truncate((modregrm & 0x38) >> 3);
             instruction.rm = @truncate(modregrm & 0x07);
 
-            instruction.consumedBytes = 2;
-
             switch (instruction.mod) {
                 0b00 => {
                     if (instruction.rm == 0b110) {
-                        if (bytes.len < startIndex + 4) return error.InsufficientBytes;
+                        if (bytes.len < startIndex + 4)
+                            return error.InsufficientBytes;
                         // direct address 16-bit displacement
-                        instruction.displacement = @as(u16, bytes[startIndex + 2]) | (@as(u16, bytes[startIndex + 3]) << 8);
+                        instruction.displacement = @as(
+                            u16,
+                            bytes[startIndex + 2],
+                        ) | (@as(
+                            u16,
+                            bytes[startIndex + 3],
+                        ) << 8);
+                        instruction.consumedBytes = 4;
                     }
+                    instruction.consumedBytes = 2;
                 },
                 0b01 => {
-                    if (bytes.len < startIndex + 3) return error.InsufficientBytes;
+                    if (bytes.len < startIndex + 3)
+                        return error.InsufficientBytes;
                     // 8-bit displacement
                     instruction.displacement = bytes[startIndex + 2];
+                    instruction.consumedBytes = 3;
                 },
                 0b10 => {
-                    if (bytes.len < startIndex + 4) return error.InsufficientBytes;
+                    if (bytes.len < startIndex + 4)
+                        return error.InsufficientBytes;
                     // 16-bit displacement
-                    instruction.displacement = @as(u16, bytes[startIndex + 2]) | (@as(u16, bytes[startIndex + 3]) << 8);
+                    instruction.displacement = @as(
+                        u16,
+                        bytes[startIndex + 2],
+                    ) | (@as(u16, bytes[startIndex + 3]) << 8);
+                    instruction.consumedBytes = 4;
                 },
                 0b11 => {
                     // no displacement
+                    instruction.consumedBytes = 2;
                 },
             }
         }
 
         // MOV immediate to register (1011wreg)
-        if (bytes[startIndex] & 0xF0 == 0xB0) {}
+        if (bytes[startIndex] & 0xF0 == 0xB0) {
+            instruction.op = .mov;
+            instruction.d = 1;
+            const opcodewreg = bytes[startIndex];
+            instruction.w = if (opcodewreg & 0x08 == 0) 0 else 1;
+            instruction.reg = @truncate(opcodewreg & 0x07);
+            if (instruction.w == 1) {
+                if (bytes.len < startIndex + 3)
+                    return error.InsufficientBytes;
+                // 16-bit immediate
+                instruction.immediate = @as(u16, bytes[startIndex + 1]) |
+                    (@as(u16, bytes[startIndex + 2]) << 8);
+                instruction.consumedBytes = 3;
+            } else {
+                if (bytes.len < startIndex + 2)
+                    return error.InsufficientBytes;
+                // 8-bit immediate
+                instruction.immediate = bytes[startIndex + 1];
+                instruction.consumedBytes = 2;
+            }
+        }
 
         return instruction;
     }
@@ -104,10 +150,73 @@ const Instruction = struct {
             .mov => {
                 const dest = if (self.d == 1) self.reg else self.rm;
                 const src = if (self.d == 1) self.rm else self.reg;
-                try writer.print(" {s}, {s}", .{
-                    registerName(dest, self.w),
-                    registerName(src, self.w),
-                });
+                if (self.mod == 0b11) {
+                    try writer.print(" {s}, {s}", .{
+                        registerName(dest, self.w),
+                        registerName(src, self.w),
+                    });
+                } else {
+                    const rm_name = switch (self.rm) {
+                        0b000 => "[bx + si",
+                        0b001 => "[bx + di",
+                        0b010 => "[bp + si",
+                        0b011 => "[bp + di",
+                        0b100 => "[si",
+                        0b101 => "[di",
+                        0b110 => "[bp",
+                        0b111 => "[bx",
+                    };
+                    // direct address, mod 00, r/m 110
+                    if (self.mod == 0b00 and self.rm == 0b110) {
+                        if (self.d == 1) {
+                            try writer.print(" {s}, [{?d}]", .{
+                                registerName(dest, self.w),
+                                self.displacement,
+                            });
+                        } else {
+                            try writer.print(" []{?d}], {s}", .{
+                                self.displacement,
+                                registerName(src, self.w),
+                            });
+                        }
+                        return;
+                    }
+
+                    if (self.d == 1) {
+                        if (self.immediate != null) {
+                            try writer.print(" {s}, {?d}", .{
+                                registerName(dest, self.w),
+                                self.immediate,
+                            });
+                            return;
+                        }
+                        if (self.displacement != null) {
+                            try writer.print(" {s}, {s} + {?d}]", .{
+                                registerName(dest, self.w),
+                                rm_name,
+                                self.displacement,
+                            });
+                        } else {
+                            try writer.print(" {s}, {s}]", .{
+                                registerName(dest, self.w),
+                                rm_name,
+                            });
+                        }
+                    } else {
+                        if (self.displacement != null) {
+                            try writer.print(" {s} + {?d}], {s}", .{
+                                rm_name,
+                                self.displacement,
+                                registerName(src, self.w),
+                            });
+                        } else {
+                            try writer.print(" {s}], {s}", .{
+                                rm_name,
+                                registerName(src, self.w),
+                            });
+                        }
+                    }
+                }
             },
             .invalid => {},
         }
@@ -144,7 +253,10 @@ test "MOV reg, reg/mem pattern single instruction" {
         \\mov cx, bx
         \\
     ;
-    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    const decodedInstructions = try decodeInstructions(
+        buffer[0..buffer.len],
+        testing.allocator,
+    );
     defer decodedInstructions.deinit();
 
     var actual = ArrayList(u8).init(testing.allocator);
@@ -189,19 +301,19 @@ test "More MOVs (including immediate to register)" {
         \\mov si, bx
         \\mov dh, al
         \\mov cl, 12
-        \\mov cl, 65524
+        \\mov ch, 244
         \\mov cx, 12
         \\mov cx, 65524
-        \\mov cx, 3948
-        \\mov cx, 61588
+        \\mov dx, 3948
+        \\mov dx, 61588
         \\mov al, [bx + si]
         \\mov bx, [bp + di]
-        \\mov dx, [bp]
+        \\mov dx, [bp + 0]
         \\mov ah, [bx + si + 4]
         \\mov al, [bx + si + 4999]
         \\mov [bx + di], cx
         \\mov [bp + si], cl
-        \\mov [bp], ch
+        \\mov [bp + 0], ch
         \\
     ;
 
