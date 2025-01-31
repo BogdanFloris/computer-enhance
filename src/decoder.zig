@@ -8,9 +8,15 @@ const ArrayList = std.ArrayList;
 
 // Constants for instruction patterns
 const MOV_REG_RM_PATTERN = 0x88;
+const MOV_IMM_RM_PATTERN = 0xC6;
 const MOV_IMM_REG_PATTERN = 0xB0;
+const MOV_MEM_ACC_PATTERN = 0xA0;
+const MOV_ACC_MEM_PATTERN = 0xA2;
 const MOV_REG_RM_MASK = 0xFC;
+const MOV_IMM_RM_MASK = 0xFE;
 const MOV_IMM_REG_MASK = 0xF0;
+const MOV_MEM_ACC_MASK = 0xFE;
+const MOV_ACC_MEM_MASK = 0xFE;
 
 // Instruction set components
 const Opcode = enum { mov, invalid };
@@ -96,6 +102,15 @@ const Instruction = struct {
         if (try decodeMovImmediateToReg(bytes, startIndex, &instruction)) {
             return instruction;
         }
+        if (try decodeMovImmediateToRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeMovMemToAcc(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeMovAccToMem(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
 
         return instruction;
     }
@@ -158,7 +173,85 @@ const Instruction = struct {
         return true;
     }
 
-    fn decodeMovImmediateToReg(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+    fn decodeMovImmediateToRm(
+        bytes: []const u8,
+        startIndex: usize,
+        instruction: *Instruction,
+    ) DecodeError!bool {
+        if (bytes[startIndex] & MOV_IMM_RM_MASK != MOV_IMM_RM_PATTERN) {
+            return false;
+        }
+        instruction.op = .mov;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        const modrm = bytes[startIndex + 1];
+        instruction.mod = @truncate(modrm >> 6);
+        instruction.reg = 0;
+        instruction.rm = @truncate(modrm & 0x07);
+        var offset: usize = 2;
+
+        switch (instruction.mod) {
+            0b00 => {
+                if (instruction.rm == 0b110) {
+                    if (bytes.len < startIndex + offset + 2) {
+                        return error.InsufficientBytes;
+                    }
+                    instruction.displacement = readSigned16(
+                        bytes,
+                        startIndex + offset,
+                    );
+                    offset += 2;
+                }
+            },
+            0b01 => {
+                if (bytes.len < startIndex + offset + 1) {
+                    return error.InsufficientBytes;
+                }
+                instruction.displacement = signExtend8to16(
+                    bytes[startIndex + offset],
+                );
+                offset += 1;
+            },
+            0b10 => {
+                if (bytes.len < startIndex + offset + 2) {
+                    return error.InsufficientBytes;
+                }
+                instruction.displacement = readSigned16(
+                    bytes,
+                    startIndex + offset,
+                );
+                offset += 2;
+            },
+            0b11 => {},
+        }
+
+        if (instruction.w == 1) {
+            if (bytes.len < startIndex + offset + 2) {
+                return error.InsufficientBytes;
+            }
+            instruction.immediate = readSigned16(
+                bytes,
+                startIndex + offset,
+            );
+            offset += 2;
+        } else {
+            if (bytes.len < startIndex + offset + 1) {
+                return error.InsufficientBytes;
+            }
+            instruction.immediate = signExtend8to16(
+                bytes[startIndex + offset],
+            );
+            offset += 1;
+        }
+
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeMovImmediateToReg(
+        bytes: []const u8,
+        startIndex: usize,
+        instruction: *Instruction,
+    ) DecodeError!bool {
         if (bytes[startIndex] & MOV_IMM_REG_MASK != MOV_IMM_REG_PATTERN) {
             return false;
         }
@@ -168,6 +261,7 @@ const Instruction = struct {
         const opcodewreg = bytes[startIndex];
         instruction.w = if (opcodewreg & 0x08 == 0) 0 else 1;
         instruction.reg = @truncate(opcodewreg & 0x07);
+        instruction.mod = 0b11;
 
         if (instruction.w == 1) {
             if (bytes.len < startIndex + 3) {
@@ -184,6 +278,52 @@ const Instruction = struct {
             instruction.immediate = signExtend8to16(bytes[startIndex + 1]);
             instruction.consumedBytes = 2;
         }
+        return true;
+    }
+
+    fn decodeMovMemToAcc(
+        bytes: []const u8,
+        startIndex: usize,
+        instruction: *Instruction,
+    ) DecodeError!bool {
+        if (bytes[startIndex] & MOV_MEM_ACC_MASK != MOV_MEM_ACC_PATTERN) {
+            return false;
+        }
+        instruction.op = .mov;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        instruction.d = 1; // Always accumulator as destination
+        instruction.mod = 0;
+        instruction.reg = 0; // Accumulator
+        instruction.rm = 0b110; // Direct address mode
+
+        if (bytes.len < startIndex + 3) {
+            return error.InsufficientBytes;
+        }
+        instruction.displacement = readSigned16(bytes, startIndex + 1);
+        instruction.consumedBytes = 3;
+        return true;
+    }
+
+    fn decodeMovAccToMem(
+        bytes: []const u8,
+        startIndex: usize,
+        instruction: *Instruction,
+    ) DecodeError!bool {
+        if (bytes[startIndex] & MOV_ACC_MEM_MASK != MOV_ACC_MEM_PATTERN) {
+            return false;
+        }
+        instruction.op = .mov;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        instruction.d = 0; // Always memory as destination
+        instruction.mod = 0;
+        instruction.reg = 0; // Accumulator
+        instruction.rm = 0b110; // Direct address mode
+
+        if (bytes.len < startIndex + 3) {
+            return error.InsufficientBytes;
+        }
+        instruction.displacement = readSigned16(bytes, startIndex + 1);
+        instruction.consumedBytes = 3;
         return true;
     }
 
@@ -205,11 +345,36 @@ const Instruction = struct {
     }
 
     fn formatMov(self: Instruction, writer: anytype) !void {
-        const dest = if (self.d == 1) self.reg else self.rm;
-        const src = if (self.d == 1) self.rm else self.reg;
+        // Special direct address formats for accumulator
+        if (self.rm == 0b110 and self.mod == 0b00 and self.reg == 0 and
+            (self.immediate == null or self.d == 1))
+        {
+            if (self.d == 1) {
+                try writer.print(" {s}, [{d}]", .{
+                    registerName(0, self.w),
+                    self.displacement.?,
+                });
+            } else {
+                try writer.print(" [{d}], {s}", .{
+                    self.displacement.?,
+                    registerName(0, self.w),
+                });
+            }
+            return;
+        }
+
+        // Handle immediate to register
+        if (self.immediate != null and self.mod == 0b11) {
+            try writer.print(" {s}, {d}", .{
+                registerName(self.reg, self.w),
+                self.immediate.?,
+            });
+            return;
+        }
 
         if (self.mod == 0b11) {
-            // Register to register
+            const dest = if (self.d == 1) self.reg else self.rm;
+            const src = if (self.d == 1) self.rm else self.reg;
             try writer.print(" {s}, {s}", .{
                 registerName(dest, self.w),
                 registerName(src, self.w),
@@ -217,26 +382,24 @@ const Instruction = struct {
             return;
         }
 
-        // Handle immediate to register
-        if (self.immediate != null) {
-            try writer.print(" {s}, {d}", .{
-                registerName(dest, self.w),
-                self.immediate.?,
-            });
-            return;
-        }
-
-        // Handle direct address (mod 00, r/m 110)
+        // Handle memory operands
         if (self.mod == 0b00 and self.rm == 0b110) {
-            if (self.d == 1) {
+            // Direct address
+            if (self.immediate != null) {
+                try writer.print(" [{d}], {s} {d}", .{
+                    self.displacement.?,
+                    if (self.w == 1) "word" else "byte",
+                    self.immediate.?,
+                });
+            } else if (self.d == 1) {
                 try writer.print(" {s}, [{d}]", .{
-                    registerName(dest, self.w),
+                    registerName(self.reg, self.w),
                     self.displacement.?,
                 });
             } else {
                 try writer.print(" [{d}], {s}", .{
                     self.displacement.?,
-                    registerName(src, self.w),
+                    registerName(self.reg, self.w),
                 });
             }
             return;
@@ -244,24 +407,49 @@ const Instruction = struct {
 
         // Handle other memory addressing modes
         const rm_name = getRmName(self.rm);
-        if (self.d == 1) {
+        if (self.immediate != null) {
+            // Immediate to memory
+            if (self.displacement != null) {
+                if (self.displacement.? >= 0) {
+                    try writer.print(" {s} + {d}], {s} {d}", .{
+                        rm_name,
+                        self.displacement.?,
+                        if (self.w == 1) "word" else "byte",
+                        self.immediate.?,
+                    });
+                } else {
+                    try writer.print(" {s} - {d}], {s} {d}", .{
+                        rm_name,
+                        -self.displacement.?,
+                        if (self.w == 1) "word" else "byte",
+                        self.immediate.?,
+                    });
+                }
+            } else {
+                try writer.print(" {s}], {s} {d}", .{
+                    rm_name,
+                    if (self.w == 1) "word" else "byte",
+                    self.immediate.?,
+                });
+            }
+        } else if (self.d == 1) {
             if (self.displacement != null) {
                 if (self.displacement.? >= 0) {
                     try writer.print(" {s}, {s} + {d}]", .{
-                        registerName(dest, self.w),
+                        registerName(self.reg, self.w),
                         rm_name,
                         self.displacement.?,
                     });
                 } else {
                     try writer.print(" {s}, {s} - {d}]", .{
-                        registerName(dest, self.w),
+                        registerName(self.reg, self.w),
                         rm_name,
                         -self.displacement.?,
                     });
                 }
             } else {
                 try writer.print(" {s}, {s}]", .{
-                    registerName(dest, self.w),
+                    registerName(self.reg, self.w),
                     rm_name,
                 });
             }
@@ -271,19 +459,19 @@ const Instruction = struct {
                     try writer.print(" {s} + {d}], {s}", .{
                         rm_name,
                         self.displacement.?,
-                        registerName(src, self.w),
+                        registerName(self.reg, self.w),
                     });
                 } else {
                     try writer.print(" {s} - {d}], {s}", .{
                         rm_name,
                         -self.displacement.?,
-                        registerName(src, self.w),
+                        registerName(self.reg, self.w),
                     });
                 }
             } else {
                 try writer.print(" {s}], {s}", .{
                     rm_name,
-                    registerName(src, self.w),
+                    registerName(self.reg, self.w),
                 });
             }
         }
@@ -381,6 +569,34 @@ test "More MOVs (including immediate to register)" {
         \\mov [bx + di], cx
         \\mov [bp + si], cl
         \\mov [bp + 0], ch
+        \\
+    ;
+
+    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    defer decodedInstructions.deinit();
+
+    var actual = ArrayList(u8).init(testing.allocator);
+    defer actual.deinit();
+    try formatInstructions(decodedInstructions.items, actual.writer());
+
+    try testing.expectEqualStrings(expected, actual.items);
+}
+
+test "Challenge MOVs" {
+    var buffer = [_]u8{ 0b10001011, 0b01000001, 0b11011011, 0b10001001, 0b10001100, 0b11010100, 0b11111110, 0b10001011, 0b01010111, 0b11100000, 0b11000110, 0b00000011, 0b00000111, 0b11000111, 0b10000101, 0b10000101, 0b00000011, 0b01011011, 0b00000001, 0b10001011, 0b00101110, 0b00000101, 0b00000000, 0b10001011, 0b00011110, 0b10000010, 0b00001101, 0b10100001, 0b11111011, 0b00001001, 0b10100001, 0b00010000, 0b00000000, 0b10100011, 0b11111010, 0b00001001, 0b10100011, 0b00001111, 0b00000000 };
+    const expected =
+        \\bits 16
+        \\mov ax, [bx + di - 37]
+        \\mov [si - 300], cx
+        \\mov dx, [bx - 32]
+        \\mov [bp + di], byte 7
+        \\mov [di + 901], word 347
+        \\mov bp, [5]
+        \\mov bx, [3458]
+        \\mov ax, [2555]
+        \\mov ax, [16]
+        \\mov [2554], ax
+        \\mov [15], ax
         \\
     ;
 
