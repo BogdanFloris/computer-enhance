@@ -9,7 +9,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const file = std.fs.cwd().openFile("asm/many_register_mov", .{ .mode = .read_only }) catch |err| {
+    const file = std.fs.cwd().openFile("asm/more_movs", .{ .mode = .read_only }) catch |err| {
         std.debug.print("Failed to open file: {s}\n", .{@errorName(err)});
         return;
     };

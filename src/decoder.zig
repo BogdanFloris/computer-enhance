@@ -96,6 +96,9 @@ pub fn decodeInstructions(binaryInstructions: []const u8, allocator: Allocator) 
     var i: usize = 0;
     while (i < binaryInstructions.len) {
         const instruction = try Instruction.decode(binaryInstructions, i);
+        if (instruction.op == .invalid) {
+            return error.InvalidInstruction;
+        }
         try decodedInstructions.append(instruction);
         i += instruction.consumedBytes;
     }
