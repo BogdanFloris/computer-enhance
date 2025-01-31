@@ -22,8 +22,8 @@ const Instruction = struct {
     mod: u2, // mode
     reg: u3, // register
     rm: u3, // register/memory
-    displacement: ?u16, // displacement
-    immediate: ?u16, // data
+    displacement: ?i16, // displacement can be signed
+    immediate: ?i16, // immediate can be signed
     consumedBytes: usize,
 
     // Register lookup tables
@@ -65,6 +65,18 @@ const Instruction = struct {
         };
     }
 
+    // Helper function to sign extend 8-bit value to 16-bit
+    fn signExtend8to16(value: u8) i16 {
+        const signed: i8 = @bitCast(value);
+        return signed;
+    }
+
+    // Helper function to read a signed 16-bit value
+    fn readSigned16(bytes: []const u8, index: usize) i16 {
+        const unsigned = @as(u16, bytes[index]) | (@as(u16, bytes[index + 1]) << 8);
+        return @bitCast(unsigned);
+    }
+
     pub fn decode(bytes: []const u8, startIndex: usize) !Instruction {
         var instruction = Instruction{
             .op = .invalid,
@@ -78,17 +90,22 @@ const Instruction = struct {
             .consumedBytes = 0,
         };
 
-        if (decodeMovRegRm(bytes, startIndex, &instruction)) {
+        if (try decodeMovRegRm(bytes, startIndex, &instruction)) {
             return instruction;
         }
-        if (decodeMovImmediateToReg(bytes, startIndex, &instruction)) {
+        if (try decodeMovImmediateToReg(bytes, startIndex, &instruction)) {
             return instruction;
         }
 
         return instruction;
     }
 
-    fn decodeMovRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) bool {
+    const DecodeError = error{
+        InsufficientBytes,
+        InvalidOpcode,
+    };
+
+    fn decodeMovRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
         if (bytes[startIndex] & MOV_REG_RM_MASK != MOV_REG_RM_PATTERN) {
             return false;
         }
@@ -108,31 +125,29 @@ const Instruction = struct {
             0b00 => {
                 if (instruction.rm == 0b110) {
                     if (bytes.len < startIndex + 4) {
-                        return false;
+                        return error.InsufficientBytes;
                     }
                     // direct address 16-bit displacement
-                    instruction.displacement = @as(u16, bytes[startIndex + 2]) |
-                        (@as(u16, bytes[startIndex + 3]) << 8);
+                    instruction.displacement = readSigned16(bytes, startIndex + 2);
                     instruction.consumedBytes = 4;
-                } else {
-                    instruction.consumedBytes = 2;
+                    return true;
                 }
+                instruction.consumedBytes = 2;
             },
             0b01 => {
                 if (bytes.len < startIndex + 3) {
-                    return false;
+                    return error.InsufficientBytes;
                 }
-                // 8-bit displacement
-                instruction.displacement = bytes[startIndex + 2];
+                // 8-bit displacement with sign extension
+                instruction.displacement = signExtend8to16(bytes[startIndex + 2]);
                 instruction.consumedBytes = 3;
             },
             0b10 => {
                 if (bytes.len < startIndex + 4) {
-                    return false;
+                    return error.InsufficientBytes;
                 }
                 // 16-bit displacement
-                instruction.displacement = @as(u16, bytes[startIndex + 2]) |
-                    (@as(u16, bytes[startIndex + 3]) << 8);
+                instruction.displacement = readSigned16(bytes, startIndex + 2);
                 instruction.consumedBytes = 4;
             },
             0b11 => {
@@ -143,11 +158,7 @@ const Instruction = struct {
         return true;
     }
 
-    fn decodeMovImmediateToReg(
-        bytes: []const u8,
-        startIndex: usize,
-        instruction: *Instruction,
-    ) bool {
+    fn decodeMovImmediateToReg(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
         if (bytes[startIndex] & MOV_IMM_REG_MASK != MOV_IMM_REG_PATTERN) {
             return false;
         }
@@ -160,18 +171,17 @@ const Instruction = struct {
 
         if (instruction.w == 1) {
             if (bytes.len < startIndex + 3) {
-                return false;
+                return error.InsufficientBytes;
             }
             // 16-bit immediate
-            instruction.immediate = @as(u16, bytes[startIndex + 1]) |
-                (@as(u16, bytes[startIndex + 2]) << 8);
+            instruction.immediate = readSigned16(bytes, startIndex + 1);
             instruction.consumedBytes = 3;
         } else {
             if (bytes.len < startIndex + 2) {
-                return false;
+                return error.InsufficientBytes;
             }
-            // 8-bit immediate
-            instruction.immediate = bytes[startIndex + 1];
+            // 8-bit immediate with sign extension
+            instruction.immediate = signExtend8to16(bytes[startIndex + 1]);
             instruction.consumedBytes = 2;
         }
         return true;
@@ -209,9 +219,9 @@ const Instruction = struct {
 
         // Handle immediate to register
         if (self.immediate != null) {
-            try writer.print(" {s}, {?d}", .{
+            try writer.print(" {s}, {d}", .{
                 registerName(dest, self.w),
-                self.immediate,
+                self.immediate.?,
             });
             return;
         }
@@ -219,13 +229,13 @@ const Instruction = struct {
         // Handle direct address (mod 00, r/m 110)
         if (self.mod == 0b00 and self.rm == 0b110) {
             if (self.d == 1) {
-                try writer.print(" {s}, [{?d}]", .{
+                try writer.print(" {s}, [{d}]", .{
                     registerName(dest, self.w),
-                    self.displacement,
+                    self.displacement.?,
                 });
             } else {
-                try writer.print(" [{?d}], {s}", .{
-                    self.displacement,
+                try writer.print(" [{d}], {s}", .{
+                    self.displacement.?,
                     registerName(src, self.w),
                 });
             }
@@ -236,11 +246,19 @@ const Instruction = struct {
         const rm_name = getRmName(self.rm);
         if (self.d == 1) {
             if (self.displacement != null) {
-                try writer.print(" {s}, {s} + {?d}]", .{
-                    registerName(dest, self.w),
-                    rm_name,
-                    self.displacement,
-                });
+                if (self.displacement.? >= 0) {
+                    try writer.print(" {s}, {s} + {d}]", .{
+                        registerName(dest, self.w),
+                        rm_name,
+                        self.displacement.?,
+                    });
+                } else {
+                    try writer.print(" {s}, {s} - {d}]", .{
+                        registerName(dest, self.w),
+                        rm_name,
+                        -self.displacement.?,
+                    });
+                }
             } else {
                 try writer.print(" {s}, {s}]", .{
                     registerName(dest, self.w),
@@ -249,11 +267,19 @@ const Instruction = struct {
             }
         } else {
             if (self.displacement != null) {
-                try writer.print(" {s} + {?d}], {s}", .{
-                    rm_name,
-                    self.displacement,
-                    registerName(src, self.w),
-                });
+                if (self.displacement.? >= 0) {
+                    try writer.print(" {s} + {d}], {s}", .{
+                        rm_name,
+                        self.displacement.?,
+                        registerName(src, self.w),
+                    });
+                } else {
+                    try writer.print(" {s} - {d}], {s}", .{
+                        rm_name,
+                        -self.displacement.?,
+                        registerName(src, self.w),
+                    });
+                }
             } else {
                 try writer.print(" {s}], {s}", .{
                     rm_name,
@@ -342,11 +368,11 @@ test "More MOVs (including immediate to register)" {
         \\mov si, bx
         \\mov dh, al
         \\mov cl, 12
-        \\mov ch, 244
+        \\mov ch, -12
         \\mov cx, 12
-        \\mov cx, 65524
+        \\mov cx, -12
         \\mov dx, 3948
-        \\mov dx, 61588
+        \\mov dx, -3948
         \\mov al, [bx + si]
         \\mov bx, [bp + di]
         \\mov dx, [bp + 0]
