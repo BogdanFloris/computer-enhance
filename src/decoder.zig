@@ -40,10 +40,11 @@ const Instruction = struct {
     mod: u2, // mode
     reg: u3, // register
     rm: u3, // register/memory
+    displacement: ?u16, // displacement
     consumedBytes: usize,
 
     pub fn decode(bytes: []const u8, startIndex: usize) !Instruction {
-        var instruction = Instruction{ .op = .invalid, .d = 0, .w = 0, .mod = 0b00, .reg = 0b000, .rm = 0b000, .consumedBytes = 0 };
+        var instruction = Instruction{ .op = .invalid, .d = 0, .w = 0, .mod = 0b00, .reg = 0b000, .rm = 0b000, .displacement = undefined, .consumedBytes = 0 };
 
         // MOV reg, reg/mem pattern (100010dw)
         if (bytes[startIndex] & 0xFC == 0x88) {
@@ -58,6 +59,29 @@ const Instruction = struct {
             instruction.rm = @truncate(modregrm & 0x07);
 
             instruction.consumedBytes = 2;
+
+            switch (instruction.mod) {
+                0b00 => {
+                    if (instruction.rm == 0b110) {
+                        if (bytes.len < startIndex + 4) return error.InsufficientBytes;
+                        // direct address 16-bit displacement
+                        instruction.displacement = @as(u16, bytes[startIndex + 2]) | (@as(u16, bytes[startIndex + 3]) << 8);
+                    }
+                },
+                0b01 => {
+                    if (bytes.len < startIndex + 3) return error.InsufficientBytes;
+                    // 8-bit displacement
+                    instruction.displacement = bytes[startIndex + 2];
+                },
+                0b10 => {
+                    if (bytes.len < startIndex + 4) return error.InsufficientBytes;
+                    // 16-bit displacement
+                    instruction.displacement = @as(u16, bytes[startIndex + 2]) | (@as(u16, bytes[startIndex + 3]) << 8);
+                },
+                0b11 => {
+                    // no displacement
+                },
+            }
         }
 
         // MOV immediate to register (1011wreg)
@@ -158,4 +182,35 @@ test "MOV reg, reg/mem pattern multiple instructions" {
     try testing.expectEqualStrings(expected, actual.items);
 }
 
-test "More MOVs (including immediate to register)" {}
+test "More MOVs (including immediate to register)" {
+    var buffer = [_]u8{ 0b10001001, 0b11011110, 0b10001000, 0b11000110, 0b10110001, 0b00001100, 0b10110101, 0b11110100, 0b10111001, 0b00001100, 0b00000000, 0b10111001, 0b11110100, 0b11111111, 0b10111010, 0b01101100, 0b00001111, 0b10111010, 0b10010100, 0b11110000, 0b10001010, 0b00000000, 0b10001011, 0b00011011, 0b10001011, 0b01010110, 0b00000000, 0b10001010, 0b01100000, 0b00000100, 0b10001010, 0b10000000, 0b10000111, 0b00010011, 0b10001001, 0b00001001, 0b10001000, 0b00001010, 0b10001000, 0b01101110, 0b00000000 };
+    const expected =
+        \\bits 16
+        \\mov si, bx
+        \\mov dh, al
+        \\mov cl, 12
+        \\mov cl, 65524
+        \\mov cx, 12
+        \\mov cx, 65524
+        \\mov cx, 3948
+        \\mov cx, 61588
+        \\mov al, [bx + si]
+        \\mov bx, [bp + di]
+        \\mov dx, [bp]
+        \\mov ah, [bx + si + 4]
+        \\mov al, [bx + si + 4999]
+        \\mov [bx + di], cx
+        \\mov [bp + si], cl
+        \\mov [bp], ch
+        \\
+    ;
+
+    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    defer decodedInstructions.deinit();
+
+    var actual = ArrayList(u8).init(testing.allocator);
+    defer actual.deinit();
+    try formatInstructions(decodedInstructions.items, actual.writer());
+
+    try testing.expectEqualStrings(expected, actual.items);
+}
