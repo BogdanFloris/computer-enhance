@@ -345,136 +345,103 @@ const Instruction = struct {
     }
 
     fn formatMov(self: Instruction, writer: anytype) !void {
-        // Special direct address formats for accumulator
-        if (self.rm == 0b110 and self.mod == 0b00 and self.reg == 0 and
-            (self.immediate == null or self.d == 1))
-        {
-            if (self.d == 1) {
+        // Handle accumulator direct address
+        if (self.rm == 0b110 and self.mod == 0b00 and self.reg == 0 and (self.immediate == null or self.d == 1)) {
+            return if (self.d == 1)
                 try writer.print(" {s}, [{d}]", .{
                     registerName(0, self.w),
                     self.displacement.?,
-                });
-            } else {
+                })
+            else
                 try writer.print(" [{d}], {s}", .{
                     self.displacement.?,
                     registerName(0, self.w),
                 });
-            }
-            return;
         }
 
         // Handle immediate to register
         if (self.immediate != null and self.mod == 0b11) {
-            try writer.print(" {s}, {d}", .{
+            return try writer.print(" {s}, {d}", .{
                 registerName(self.reg, self.w),
                 self.immediate.?,
             });
-            return;
         }
 
+        // Handle register to register
         if (self.mod == 0b11) {
             const dest = if (self.d == 1) self.reg else self.rm;
             const src = if (self.d == 1) self.rm else self.reg;
-            try writer.print(" {s}, {s}", .{
+            return try writer.print(" {s}, {s}", .{
                 registerName(dest, self.w),
                 registerName(src, self.w),
             });
-            return;
         }
 
-        // Handle memory operands
+        // Handle direct address
         if (self.mod == 0b00 and self.rm == 0b110) {
-            // Direct address
             if (self.immediate != null) {
-                try writer.print(" [{d}], {s} {d}", .{
+                return try writer.print(" [{d}], {s} {d}", .{
                     self.displacement.?,
                     if (self.w == 1) "word" else "byte",
                     self.immediate.?,
                 });
-            } else if (self.d == 1) {
+            }
+            return if (self.d == 1)
                 try writer.print(" {s}, [{d}]", .{
                     registerName(self.reg, self.w),
                     self.displacement.?,
-                });
-            } else {
+                })
+            else
                 try writer.print(" [{d}], {s}", .{
                     self.displacement.?,
                     registerName(self.reg, self.w),
                 });
-            }
-            return;
         }
 
-        // Handle other memory addressing modes
+        // Handle memory operations
         const rm_name = getRmName(self.rm);
         if (self.immediate != null) {
-            // Immediate to memory
-            if (self.displacement != null) {
-                if (self.displacement.? >= 0) {
-                    try writer.print(" {s} + {d}], {s} {d}", .{
-                        rm_name,
-                        self.displacement.?,
-                        if (self.w == 1) "word" else "byte",
-                        self.immediate.?,
-                    });
-                } else {
-                    try writer.print(" {s} - {d}], {s} {d}", .{
-                        rm_name,
-                        -self.displacement.?,
-                        if (self.w == 1) "word" else "byte",
-                        self.immediate.?,
-                    });
-                }
-            } else {
+            return if (self.displacement) |d|
+                try writer.print(" {s}{s}{d}], {s} {d}", .{
+                    rm_name,
+                    if (d >= 0) " + " else " - ",
+                    if (d >= 0) d else -d,
+                    if (self.w == 1) "word" else "byte",
+                    self.immediate.?,
+                })
+            else
                 try writer.print(" {s}], {s} {d}", .{
                     rm_name,
                     if (self.w == 1) "word" else "byte",
                     self.immediate.?,
                 });
-            }
-        } else if (self.d == 1) {
-            if (self.displacement != null) {
-                if (self.displacement.? >= 0) {
-                    try writer.print(" {s}, {s} + {d}]", .{
-                        registerName(self.reg, self.w),
-                        rm_name,
-                        self.displacement.?,
-                    });
-                } else {
-                    try writer.print(" {s}, {s} - {d}]", .{
-                        registerName(self.reg, self.w),
-                        rm_name,
-                        -self.displacement.?,
-                    });
-                }
-            } else {
+        }
+
+        return if (self.d == 1)
+            if (self.displacement) |d|
+                try writer.print(" {s}, {s}{s}{d}]", .{
+                    registerName(self.reg, self.w),
+                    rm_name,
+                    if (d >= 0) " + " else " - ",
+                    if (d >= 0) d else -d,
+                })
+            else
                 try writer.print(" {s}, {s}]", .{
                     registerName(self.reg, self.w),
                     rm_name,
-                });
-            }
-        } else {
-            if (self.displacement != null) {
-                if (self.displacement.? >= 0) {
-                    try writer.print(" {s} + {d}], {s}", .{
-                        rm_name,
-                        self.displacement.?,
-                        registerName(self.reg, self.w),
-                    });
-                } else {
-                    try writer.print(" {s} - {d}], {s}", .{
-                        rm_name,
-                        -self.displacement.?,
-                        registerName(self.reg, self.w),
-                    });
-                }
-            } else {
-                try writer.print(" {s}], {s}", .{
-                    rm_name,
-                    registerName(self.reg, self.w),
-                });
-            }
-        }
+                })
+        else if (self.displacement) |d|
+            try writer.print(" {s}{s}{d}], {s}", .{
+                rm_name,
+                if (d >= 0) " + " else " - ",
+                if (d >= 0) d else -d,
+                registerName(self.reg, self.w),
+            })
+        else
+            try writer.print(" {s}], {s}", .{
+                rm_name,
+                registerName(self.reg, self.w),
+            });
     }
 };
 
