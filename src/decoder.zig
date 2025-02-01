@@ -135,41 +135,45 @@ const Instruction = struct {
         instruction.reg = @truncate((modregrm & 0x38) >> 3);
         instruction.rm = @truncate(modregrm & 0x07);
 
-        // Handle displacement based on mod
+        var offset: usize = 2;
         switch (instruction.mod) {
             0b00 => {
                 if (instruction.rm == 0b110) {
-                    if (bytes.len < startIndex + 4) {
+                    if (bytes.len < startIndex + offset + 2) {
                         return error.InsufficientBytes;
                     }
                     // direct address 16-bit displacement
-                    instruction.displacement = readSigned16(bytes, startIndex + 2);
-                    instruction.consumedBytes = 4;
-                    return true;
+                    instruction.displacement = readSigned16(
+                        bytes,
+                        startIndex + offset,
+                    );
+                    offset += 2;
                 }
-                instruction.consumedBytes = 2;
             },
             0b01 => {
-                if (bytes.len < startIndex + 3) {
+                if (bytes.len < startIndex + offset + 1) {
                     return error.InsufficientBytes;
                 }
                 // 8-bit displacement with sign extension
-                instruction.displacement = signExtend8to16(bytes[startIndex + 2]);
-                instruction.consumedBytes = 3;
+                instruction.displacement = signExtend8to16(
+                    bytes[startIndex + offset],
+                );
+                offset += 1;
             },
             0b10 => {
-                if (bytes.len < startIndex + 4) {
+                if (bytes.len < startIndex + offset + 2) {
                     return error.InsufficientBytes;
                 }
                 // 16-bit displacement
-                instruction.displacement = readSigned16(bytes, startIndex + 2);
-                instruction.consumedBytes = 4;
+                instruction.displacement = readSigned16(
+                    bytes,
+                    startIndex + offset,
+                );
+                offset += 2;
             },
-            0b11 => {
-                // no displacement
-                instruction.consumedBytes = 2;
-            },
+            0b11 => {},
         }
+        instruction.consumedBytes = offset;
         return true;
     }
 
@@ -187,8 +191,8 @@ const Instruction = struct {
         instruction.mod = @truncate(modrm >> 6);
         instruction.reg = 0;
         instruction.rm = @truncate(modrm & 0x07);
-        var offset: usize = 2;
 
+        var offset: usize = 2;
         switch (instruction.mod) {
             0b00 => {
                 if (instruction.rm == 0b110) {
