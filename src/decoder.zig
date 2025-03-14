@@ -7,6 +7,7 @@ const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 
 // Constants for instruction patterns
+// MOV patterns
 const MOV_REG_RM_PATTERN = 0x88;
 const MOV_IMM_RM_PATTERN = 0xC6;
 const MOV_IMM_REG_PATTERN = 0xB0;
@@ -18,8 +19,35 @@ const MOV_IMM_REG_MASK = 0xF0;
 const MOV_MEM_ACC_MASK = 0xFE;
 const MOV_ACC_MEM_MASK = 0xFE;
 
+// ADD patterns
+const ADD_REG_RM_PATTERN = 0x00;
+const ADD_IMM_RM_PATTERN = 0x80; // Note: shared with SUB and CMP (reg field distinguishes)
+const ADD_IMM_ACC_PATTERN = 0x04;
+const ADD_REG_RM_MASK = 0xFC;
+const ADD_IMM_RM_MASK = 0xFC;
+const ADD_IMM_ACC_MASK = 0xFE;
+
+// SUB patterns
+const SUB_REG_RM_PATTERN = 0x28;
+const SUB_IMM_ACC_PATTERN = 0x2C;
+const SUB_REG_RM_MASK = 0xFC;
+const SUB_IMM_ACC_MASK = 0xFE;
+// SUB uses same IMM_RM pattern (0x80) as ADD but with different reg field
+
+// CMP patterns
+const CMP_REG_RM_PATTERN = 0x38;
+const CMP_IMM_ACC_PATTERN = 0x3C;
+const CMP_REG_RM_MASK = 0xFC;
+const CMP_IMM_ACC_MASK = 0xFE;
+// CMP uses same IMM_RM pattern (0x80) as ADD and SUB but with different reg field
+
+// Reg field values for IMM_RM operations
+const REG_FIELD_ADD = 0;
+const REG_FIELD_SUB = 5;
+const REG_FIELD_CMP = 7;
+
 // Instruction set components
-const Opcode = enum { mov, invalid };
+const Opcode = enum { mov, add, sub, cmp, invalid };
 
 const Instruction = struct {
     op: Opcode,
@@ -28,6 +56,7 @@ const Instruction = struct {
     mod: u2, // mode
     reg: u3, // register
     rm: u3, // register/memory
+    s: u1 = 0, // sign extension flag (0 - full width, 1 - sign-extended byte)
     displacement: ?i16, // displacement can be signed
     immediate: ?i16, // immediate can be signed
     consumedBytes: usize,
@@ -96,6 +125,7 @@ const Instruction = struct {
             .consumedBytes = 0,
         };
 
+        // MOV instructions
         if (try decodeMovRegRm(bytes, startIndex, &instruction)) {
             return instruction;
         }
@@ -112,6 +142,39 @@ const Instruction = struct {
             return instruction;
         }
 
+        // ADD instructions
+        if (try decodeAddRegRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeAddImmToRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeAddImmToAcc(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+
+        // SUB instructions
+        if (try decodeSubRegRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeSubImmToRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeSubImmToAcc(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+
+        // CMP instructions
+        if (try decodeCmpRegRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeCmpImmToRm(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+        if (try decodeCmpImmToAcc(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+
         return instruction;
     }
 
@@ -119,6 +182,80 @@ const Instruction = struct {
         InsufficientBytes,
         InvalidOpcode,
     };
+
+    // Common functionality for decoding register/memory addressing
+    fn decodeModRegRm(bytes: []const u8, startIndex: usize, offset: *usize, instruction: *Instruction) DecodeError!void {
+        const modregrm = bytes[startIndex + 1];
+        instruction.mod = @truncate(modregrm >> 6);
+        instruction.reg = @truncate((modregrm & 0x38) >> 3);
+        instruction.rm = @truncate(modregrm & 0x07);
+
+        offset.* = 2;
+        switch (instruction.mod) {
+            0b00 => {
+                if (instruction.rm == 0b110) {
+                    if (bytes.len < startIndex + offset.* + 2) {
+                        return error.InsufficientBytes;
+                    }
+                    // direct address 16-bit displacement
+                    instruction.displacement = readSigned16(
+                        bytes,
+                        startIndex + offset.*,
+                    );
+                    offset.* += 2;
+                }
+            },
+            0b01 => {
+                if (bytes.len < startIndex + offset.* + 1) {
+                    return error.InsufficientBytes;
+                }
+                // 8-bit displacement with sign extension
+                instruction.displacement = signExtend8to16(
+                    bytes[startIndex + offset.*],
+                );
+                offset.* += 1;
+            },
+            0b10 => {
+                if (bytes.len < startIndex + offset.* + 2) {
+                    return error.InsufficientBytes;
+                }
+                // 16-bit displacement
+                instruction.displacement = readSigned16(
+                    bytes,
+                    startIndex + offset.*,
+                );
+                offset.* += 2;
+            },
+            0b11 => {},
+        }
+    }
+
+    // Common functionality for decoding immediate values
+    fn decodeImmediate(bytes: []const u8, startIndex: usize, offset: *usize, instruction: *Instruction) DecodeError!void {
+        // For sign-extended instructions, decode based on s and w flags
+        if (instruction.s == 1 and instruction.w == 1) {
+            // Sign-extended 8-bit immediate to 16-bit
+            if (bytes.len < startIndex + offset.* + 1) {
+                return error.InsufficientBytes;
+            }
+            instruction.immediate = signExtend8to16(bytes[startIndex + offset.*]);
+            offset.* += 1;
+        } else if (instruction.w == 1) {
+            // Full 16-bit immediate
+            if (bytes.len < startIndex + offset.* + 2) {
+                return error.InsufficientBytes;
+            }
+            instruction.immediate = readSigned16(bytes, startIndex + offset.*);
+            offset.* += 2;
+        } else {
+            // 8-bit immediate
+            if (bytes.len < startIndex + offset.* + 1) {
+                return error.InsufficientBytes;
+            }
+            instruction.immediate = signExtend8to16(bytes[startIndex + offset.*]);
+            offset.* += 1;
+        }
+    }
 
     fn decodeMovRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
         if (bytes[startIndex] & MOV_REG_RM_MASK != MOV_REG_RM_PATTERN) {
@@ -130,49 +267,8 @@ const Instruction = struct {
         instruction.d = if (opcodedw & 0x02 == 0) 0 else 1;
         instruction.w = if (opcodedw & 0x01 == 0) 0 else 1;
 
-        const modregrm = bytes[startIndex + 1];
-        instruction.mod = @truncate(modregrm >> 6);
-        instruction.reg = @truncate((modregrm & 0x38) >> 3);
-        instruction.rm = @truncate(modregrm & 0x07);
-
-        var offset: usize = 2;
-        switch (instruction.mod) {
-            0b00 => {
-                if (instruction.rm == 0b110) {
-                    if (bytes.len < startIndex + offset + 2) {
-                        return error.InsufficientBytes;
-                    }
-                    // direct address 16-bit displacement
-                    instruction.displacement = readSigned16(
-                        bytes,
-                        startIndex + offset,
-                    );
-                    offset += 2;
-                }
-            },
-            0b01 => {
-                if (bytes.len < startIndex + offset + 1) {
-                    return error.InsufficientBytes;
-                }
-                // 8-bit displacement with sign extension
-                instruction.displacement = signExtend8to16(
-                    bytes[startIndex + offset],
-                );
-                offset += 1;
-            },
-            0b10 => {
-                if (bytes.len < startIndex + offset + 2) {
-                    return error.InsufficientBytes;
-                }
-                // 16-bit displacement
-                instruction.displacement = readSigned16(
-                    bytes,
-                    startIndex + offset,
-                );
-                offset += 2;
-            },
-            0b11 => {},
-        }
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
         instruction.consumedBytes = offset;
         return true;
     }
@@ -187,66 +283,12 @@ const Instruction = struct {
         }
         instruction.op = .mov;
         instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
-        const modrm = bytes[startIndex + 1];
-        instruction.mod = @truncate(modrm >> 6);
-        instruction.reg = 0;
-        instruction.rm = @truncate(modrm & 0x07);
 
-        var offset: usize = 2;
-        switch (instruction.mod) {
-            0b00 => {
-                if (instruction.rm == 0b110) {
-                    if (bytes.len < startIndex + offset + 2) {
-                        return error.InsufficientBytes;
-                    }
-                    instruction.displacement = readSigned16(
-                        bytes,
-                        startIndex + offset,
-                    );
-                    offset += 2;
-                }
-            },
-            0b01 => {
-                if (bytes.len < startIndex + offset + 1) {
-                    return error.InsufficientBytes;
-                }
-                instruction.displacement = signExtend8to16(
-                    bytes[startIndex + offset],
-                );
-                offset += 1;
-            },
-            0b10 => {
-                if (bytes.len < startIndex + offset + 2) {
-                    return error.InsufficientBytes;
-                }
-                instruction.displacement = readSigned16(
-                    bytes,
-                    startIndex + offset,
-                );
-                offset += 2;
-            },
-            0b11 => {},
-        }
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        instruction.reg = 0; // For MOV immediate, reg field should be 0
 
-        if (instruction.w == 1) {
-            if (bytes.len < startIndex + offset + 2) {
-                return error.InsufficientBytes;
-            }
-            instruction.immediate = readSigned16(
-                bytes,
-                startIndex + offset,
-            );
-            offset += 2;
-        } else {
-            if (bytes.len < startIndex + offset + 1) {
-                return error.InsufficientBytes;
-            }
-            instruction.immediate = signExtend8to16(
-                bytes[startIndex + offset],
-            );
-            offset += 1;
-        }
-
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
         instruction.consumedBytes = offset;
         return true;
     }
@@ -267,21 +309,9 @@ const Instruction = struct {
         instruction.reg = @truncate(opcodewreg & 0x07);
         instruction.mod = 0b11;
 
-        if (instruction.w == 1) {
-            if (bytes.len < startIndex + 3) {
-                return error.InsufficientBytes;
-            }
-            // 16-bit immediate
-            instruction.immediate = readSigned16(bytes, startIndex + 1);
-            instruction.consumedBytes = 3;
-        } else {
-            if (bytes.len < startIndex + 2) {
-                return error.InsufficientBytes;
-            }
-            // 8-bit immediate with sign extension
-            instruction.immediate = signExtend8to16(bytes[startIndex + 1]);
-            instruction.consumedBytes = 2;
-        }
+        var offset: usize = 1; // Skip the first byte
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
         return true;
     }
 
@@ -331,6 +361,174 @@ const Instruction = struct {
         return true;
     }
 
+    // ADD instruction decoders
+    fn decodeAddRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & ADD_REG_RM_MASK != ADD_REG_RM_PATTERN) {
+            return false;
+        }
+
+        const opcodedw = bytes[startIndex];
+        instruction.op = .add;
+        instruction.d = if (opcodedw & 0x02 == 0) 0 else 1;
+        instruction.w = if (opcodedw & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeAddImmToRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & ADD_IMM_RM_MASK != ADD_IMM_RM_PATTERN) {
+            return false;
+        }
+
+        const modregrm = bytes[startIndex + 1];
+        const reg_field = @as(u3, @truncate((modregrm & 0x38) >> 3));
+        if (reg_field != REG_FIELD_ADD) {
+            return false;
+        }
+
+        instruction.op = .add;
+        instruction.s = if (bytes[startIndex] & 0x02 == 0) 0 else 1;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeAddImmToAcc(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & ADD_IMM_ACC_MASK != ADD_IMM_ACC_PATTERN) {
+            return false;
+        }
+
+        instruction.op = .add;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        instruction.mod = 0b11;
+        instruction.reg = 0; // Accumulator
+        instruction.d = 1; // Destination is accumulator
+
+        var offset: usize = 1;
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    // SUB instruction decoders
+    fn decodeSubRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & SUB_REG_RM_MASK != SUB_REG_RM_PATTERN) {
+            return false;
+        }
+
+        const opcodedw = bytes[startIndex];
+        instruction.op = .sub;
+        instruction.d = if (opcodedw & 0x02 == 0) 0 else 1;
+        instruction.w = if (opcodedw & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeSubImmToRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & ADD_IMM_RM_MASK != ADD_IMM_RM_PATTERN) {
+            return false;
+        }
+
+        const modregrm = bytes[startIndex + 1];
+        const reg_field = @as(u3, @truncate((modregrm & 0x38) >> 3));
+        if (reg_field != REG_FIELD_SUB) {
+            return false;
+        }
+
+        instruction.op = .sub;
+        instruction.s = if (bytes[startIndex] & 0x02 == 0) 0 else 1;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeSubImmToAcc(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & SUB_IMM_ACC_MASK != SUB_IMM_ACC_PATTERN) {
+            return false;
+        }
+
+        instruction.op = .sub;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        instruction.mod = 0b11;
+        instruction.reg = 0; // Accumulator
+        instruction.d = 1; // Destination is accumulator
+
+        var offset: usize = 1;
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    // CMP instruction decoders
+    fn decodeCmpRegRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & CMP_REG_RM_MASK != CMP_REG_RM_PATTERN) {
+            return false;
+        }
+
+        const opcodedw = bytes[startIndex];
+        instruction.op = .cmp;
+        instruction.d = if (opcodedw & 0x02 == 0) 0 else 1;
+        instruction.w = if (opcodedw & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeCmpImmToRm(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & ADD_IMM_RM_MASK != ADD_IMM_RM_PATTERN) {
+            return false;
+        }
+
+        const modregrm = bytes[startIndex + 1];
+        const reg_field = @as(u3, @truncate((modregrm & 0x38) >> 3));
+        if (reg_field != REG_FIELD_CMP) {
+            return false;
+        }
+
+        instruction.op = .cmp;
+        instruction.s = if (bytes[startIndex] & 0x02 == 0) 0 else 1;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+
+        var offset: usize = 0;
+        try decodeModRegRm(bytes, startIndex, &offset, instruction);
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
+    fn decodeCmpImmToAcc(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        if (bytes[startIndex] & CMP_IMM_ACC_MASK != CMP_IMM_ACC_PATTERN) {
+            return false;
+        }
+
+        instruction.op = .cmp;
+        instruction.w = if (bytes[startIndex] & 0x01 == 0) 0 else 1;
+        instruction.mod = 0b11;
+        instruction.reg = 0; // Accumulator
+        instruction.d = 1; // Destination is accumulator
+
+        var offset: usize = 1;
+        try decodeImmediate(bytes, startIndex, &offset, instruction);
+        instruction.consumedBytes = offset;
+        return true;
+    }
+
     pub fn format(
         self: Instruction,
         comptime fmt: []const u8,
@@ -344,11 +542,15 @@ const Instruction = struct {
 
         switch (self.op) {
             .mov => try self.formatMov(writer),
+            .add => try self.formatArithmeticOp(writer),
+            .sub => try self.formatArithmeticOp(writer),
+            .cmp => try self.formatArithmeticOp(writer),
             .invalid => {},
         }
     }
 
-    fn formatMov(self: Instruction, writer: anytype) !void {
+    // Common formatter for both MOV and arithmetic operations
+    fn formatCommonInstruction(self: Instruction, writer: anytype) !void {
         // Handle accumulator direct address
         if (self.rm == 0b110 and self.mod == 0b00 and self.reg == 0 and (self.immediate == null or self.d == 1)) {
             return if (self.d == 1)
@@ -446,6 +648,14 @@ const Instruction = struct {
                 rm_name,
                 registerName(self.reg, self.w),
             });
+    }
+
+    fn formatMov(self: Instruction, writer: anytype) !void {
+        try self.formatCommonInstruction(writer);
+    }
+
+    fn formatArithmeticOp(self: Instruction, writer: anytype) !void {
+        try self.formatCommonInstruction(writer);
     }
 };
 
@@ -568,6 +778,99 @@ test "Challenge MOVs" {
         \\mov ax, [16]
         \\mov [2554], ax
         \\mov [15], ax
+        \\
+    ;
+
+    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    defer decodedInstructions.deinit();
+
+    var actual = ArrayList(u8).init(testing.allocator);
+    defer actual.deinit();
+    try formatInstructions(decodedInstructions.items, actual.writer());
+
+    try testing.expectEqualStrings(expected, actual.items);
+}
+
+test "ADD instructions" {
+    // Testing ADD with different addressing modes
+    var buffer = [_]u8{
+        0b00000011, 0b11000011,
+        0b00000011, 0b00001000,
+        0b00000001, 0b00010011,
+        0b10000001, 0b00000111,
+        0b00000101, 0b00000000,
+        0b00000100, 0b00101010,
+    };
+
+    const expected =
+        \\bits 16
+        \\add ax, bx
+        \\add cx, [bx + si]
+        \\add [bp + di], dx
+        \\add [bx], word 5
+        \\add al, 42
+        \\
+    ;
+
+    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    defer decodedInstructions.deinit();
+
+    var actual = ArrayList(u8).init(testing.allocator);
+    defer actual.deinit();
+    try formatInstructions(decodedInstructions.items, actual.writer());
+
+    try testing.expectEqualStrings(expected, actual.items);
+}
+
+test "SUB instructions" {
+    // Testing SUB with different addressing modes
+    var buffer = [_]u8{
+        0b00101011, 0b11000011,
+        0b00101011, 0b00001000,
+        0b00101001, 0b00010011,
+        0b10000001, 0b00101111,
+        0b00000101, 0b00000000,
+        0b00101100, 0b00101010,
+    };
+
+    const expected =
+        \\bits 16
+        \\sub ax, bx
+        \\sub cx, [bx + si]
+        \\sub [bp + di], dx
+        \\sub [bx], word 5
+        \\sub al, 42
+        \\
+    ;
+
+    const decodedInstructions = try decodeInstructions(buffer[0..buffer.len], testing.allocator);
+    defer decodedInstructions.deinit();
+
+    var actual = ArrayList(u8).init(testing.allocator);
+    defer actual.deinit();
+    try formatInstructions(decodedInstructions.items, actual.writer());
+
+    try testing.expectEqualStrings(expected, actual.items);
+}
+
+test "CMP instructions" {
+    // Testing CMP with different addressing modes
+    var buffer = [_]u8{
+        0b00111011, 0b11000011,
+        0b00111011, 0b00001000,
+        0b00111001, 0b00010011,
+        0b10000001, 0b00111111,
+        0b00000101, 0b00000000,
+        0b00111100, 0b00101010,
+    };
+
+    const expected =
+        \\bits 16
+        \\cmp ax, bx
+        \\cmp cx, [bx + si]
+        \\cmp [bp + di], dx
+        \\cmp [bx], word 5
+        \\cmp al, 42
         \\
     ;
 
