@@ -41,13 +41,66 @@ const CMP_REG_RM_MASK = 0xFC;
 const CMP_IMM_ACC_MASK = 0xFE;
 // CMP uses same IMM_RM pattern (0x80) as ADD and SUB but with different reg field
 
+// Conditional jump patterns
+const JE_PATTERN = 0x74;
+const JL_PATTERN = 0x7C;
+const JLE_PATTERN = 0x7E;
+const JB_PATTERN = 0x72;
+const JBE_PATTERN = 0x76;
+const JP_PATTERN = 0x7A;
+const JO_PATTERN = 0x70;
+const JS_PATTERN = 0x78;
+const JNE_PATTERN = 0x75;
+const JNL_PATTERN = 0x7D;
+const JG_PATTERN = 0x7F;
+const JNB_PATTERN = 0x73;
+const JA_PATTERN = 0x77;
+const JNP_PATTERN = 0x7B;
+const JNO_PATTERN = 0x71;
+const JNS_PATTERN = 0x79;
+const LOOP_PATTERN = 0xE2;
+const LOOPZ_PATTERN = 0xE1;
+const LOOPNZ_PATTERN = 0xE0;
+const JCXZ_PATTERN = 0xE3;
+
 // Reg field values for IMM_RM operations
 const REG_FIELD_ADD = 0;
 const REG_FIELD_SUB = 5;
 const REG_FIELD_CMP = 7;
 
 // Instruction set components
-const Opcode = enum { mov, add, sub, cmp, invalid };
+const Opcode = enum {
+    mov,
+    add,
+    sub,
+    cmp,
+    je,
+    jl,
+    jle,
+    jb,
+    jbe,
+    jp,
+    jo,
+    js,
+    jne,
+    jnl,
+    jg,
+    jnb,
+    ja,
+    jnp,
+    jno,
+    jns,
+    loop,
+    loopz,
+    loopnz,
+    jcxz,
+    invalid,
+};
+
+const DecodeError = error{
+    InsufficientBytes,
+    InvalidOpcode,
+};
 
 const Instruction = struct {
     op: Opcode,
@@ -59,6 +112,7 @@ const Instruction = struct {
     s: u1 = 0, // sign extension flag (0 - full width, 1 - sign-extended byte)
     displacement: ?i16, // displacement can be signed
     immediate: ?i16, // immediate can be signed
+    increment: ?i8, // loop increment
     consumedBytes: usize,
 
     // Register lookup tables
@@ -122,6 +176,7 @@ const Instruction = struct {
             .rm = 0b000,
             .displacement = null,
             .immediate = null,
+            .increment = null,
             .consumedBytes = 0,
         };
 
@@ -175,13 +230,13 @@ const Instruction = struct {
             return instruction;
         }
 
+        // Conditional jump instructions
+        if (try decodeConditionalJump(bytes, startIndex, &instruction)) {
+            return instruction;
+        }
+
         return instruction;
     }
-
-    const DecodeError = error{
-        InsufficientBytes,
-        InvalidOpcode,
-    };
 
     // Common functionality for decoding register/memory addressing
     fn decodeModRegRm(bytes: []const u8, startIndex: usize, offset: *usize, instruction: *Instruction) DecodeError!void {
@@ -529,6 +584,44 @@ const Instruction = struct {
         return true;
     }
 
+    fn decodeConditionalJump(bytes: []const u8, startIndex: usize, instruction: *Instruction) DecodeError!bool {
+        const opcode = bytes[startIndex];
+        instruction.op = switch (opcode) {
+            JE_PATTERN => .je,
+            JL_PATTERN => .jl,
+            JLE_PATTERN => .jle,
+            JB_PATTERN => .jb,
+            JBE_PATTERN => .jbe,
+            JP_PATTERN => .jp,
+            JO_PATTERN => .jo,
+            JS_PATTERN => .js,
+            JNE_PATTERN => .jne,
+            JNL_PATTERN => .jnl,
+            JG_PATTERN => .jg,
+            JNB_PATTERN => .jnb,
+            JA_PATTERN => .ja,
+            JNP_PATTERN => .jnp,
+            JNO_PATTERN => .jno,
+            JNS_PATTERN => .jns,
+            LOOP_PATTERN => .loop,
+            LOOPZ_PATTERN => .loopz,
+            LOOPNZ_PATTERN => .loopnz,
+            JCXZ_PATTERN => .jcxz,
+            else => .invalid,
+        };
+
+        if (instruction.op == .invalid) {
+            return false;
+        }
+
+        if (bytes.len < startIndex + 2) {
+            return error.InsufficientBytes;
+        }
+        instruction.increment = @bitCast(bytes[startIndex + 1]);
+        instruction.consumedBytes = 2;
+        return true;
+    }
+
     pub fn format(
         self: Instruction,
         comptime fmt: []const u8,
@@ -545,6 +638,26 @@ const Instruction = struct {
             .add => try self.formatArithmeticOp(writer),
             .sub => try self.formatArithmeticOp(writer),
             .cmp => try self.formatArithmeticOp(writer),
+            .je => try writer.print(" {d}", .{self.increment.?}),
+            .jl => try writer.print(" {d}", .{self.increment.?}),
+            .jle => try writer.print(" {d}", .{self.increment.?}),
+            .jb => try writer.print(" {d}", .{self.increment.?}),
+            .jbe => try writer.print(" {d}", .{self.increment.?}),
+            .jp => try writer.print(" {d}", .{self.increment.?}),
+            .jo => try writer.print(" {d}", .{self.increment.?}),
+            .js => try writer.print(" {d}", .{self.increment.?}),
+            .jne => try writer.print(" {d}", .{self.increment.?}),
+            .jnl => try writer.print(" {d}", .{self.increment.?}),
+            .jg => try writer.print(" {d}", .{self.increment.?}),
+            .jnb => try writer.print(" {d}", .{self.increment.?}),
+            .ja => try writer.print(" {d}", .{self.increment.?}),
+            .jnp => try writer.print(" {d}", .{self.increment.?}),
+            .jno => try writer.print(" {d}", .{self.increment.?}),
+            .jns => try writer.print(" {d}", .{self.increment.?}),
+            .loop => try writer.print(" {d}", .{self.increment.?}),
+            .loopz => try writer.print(" {d}", .{self.increment.?}),
+            .loopnz => try writer.print(" {d}", .{self.increment.?}),
+            .jcxz => try writer.print(" {d}", .{self.increment.?}),
             .invalid => {},
         }
     }
