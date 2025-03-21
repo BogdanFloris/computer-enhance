@@ -680,8 +680,14 @@ const Instruction = struct {
 
         // Handle immediate to register
         if (self.immediate != null and self.mod == 0b11) {
+            // For arithmetic operations with immediate operands (ADD/SUB/CMP),
+            // the destination register is in the rm field, not reg
+            const regField = switch (self.op) {
+                .add, .sub, .cmp => self.rm,
+                else => self.reg,
+            };
             return try writer.print(" {s}, {d}", .{
-                registerName(self.reg, self.w),
+                registerName(regField, self.w),
                 self.immediate.?,
             });
         }
