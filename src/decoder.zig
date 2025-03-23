@@ -102,7 +102,7 @@ const DecodeError = error{
     InvalidOpcode,
 };
 
-const Instruction = struct {
+pub const Instruction = struct {
     op: Opcode,
     d: u1, // direction  (0 - reg to rm, 1 - rm to reg)
     w: u1, // word/byte operation (0 - byte, 1 - word)
