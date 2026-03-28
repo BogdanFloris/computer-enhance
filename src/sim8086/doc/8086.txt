@@ -1,0 +1,427 @@
+*8086.txt*    8086 Instruction Encoding Reference (Intel, 1978)
+
+                    8086 INSTRUCTION ENCODING REFERENCE~
+
+================================================================================
+CONTENTS                                                    *8086* *8086-contents*
+
+    1. Instruction Format .................. |8086-format|
+    2. MOD Field Encoding (Table 4-8) ..... |8086-mod|
+    3. REG Field Encoding (Table 4-9) ..... |8086-reg|
+    4. R/M Field Encoding (Table 4-10) .... |8086-rm|
+    5. Instruction Encoding (Table 4-12)
+       5.1  Data Transfer .................. |8086-data-transfer|
+       5.2  Arithmetic ..................... |8086-arithmetic|
+       5.3  Logic .......................... |8086-logic|
+       5.4  String Manipulation ............ |8086-string|
+       5.5  Control Transfer ............... |8086-control|
+       5.6  Interrupt ...................... |8086-interrupt|
+       5.7  Processor Control .............. |8086-processor-control|
+
+================================================================================
+1. Instruction Format                                       *8086-format*
+
+>
+      BYTE 1          BYTE 2        BYTE 3      BYTE 4      BYTE 5     BYTE 6
+  +----------+---+---+-----+-----+-----+  - - - - - - - - - - - - - - - - - - -+
+  |          |   |   |     |     |     |  |           |           |         |   |
+  |  OPCODE  | D | W | MOD | REG | R/M |  | LOW DISP/ | HIGH DISP/| LOW     |HIGH
+  |          |   |   |     |     |     |  |   DATA    |   DATA    | DATA    |DATA
+  +----------+---+---+-----+-----+-----+  - - - - - - - - - - - - - - - - - - -+
+       |       |   |    |      |     |
+       |       |   |    |      |     +-- REGISTER OPERAND/REGISTERS TO USE
+       |       |   |    |      |        IN EA CALCULATION
+       |       |   |    |      |
+       |       |   |    |      +------- REGISTER OPERAND/EXTENSION OF OPCODE
+       |       |   |    |
+       |       |   |    +-------------- REGISTER MODE/MEMORY MODE WITH
+       |       |   |                    DISPLACEMENT LENGTH
+       |       |   |
+       |       |   +------------------- WORD/BYTE OPERATION
+       |       |
+       |       +----------------------- DIRECTION IS TO REGISTER/
+       |                                DIRECTION IS FROM REGISTER
+       |
+       +------------------------------- OPERATION (INSTRUCTION) CODE
+<
+
+================================================================================
+2. MOD (Mode) Field Encoding                       *8086-mod* *8086-table-4-8*
+
+    Table 4-8~
+>
+  +------+------------------------------------------+
+  | CODE |              EXPLANATION                  |
+  +------+------------------------------------------+
+  |  00  | Memory Mode, no displacement follows*    |
+  |  01  | Memory Mode, 8-bit displacement follows  |
+  |  10  | Memory Mode, 16-bit displacement follows |
+  |  11  | Register Mode (no displacement)           |
+  +------+------------------------------------------+
+<
+    * Except when R/M = 110, then 16-bit displacement follows.
+
+================================================================================
+3. REG (Register) Field Encoding                   *8086-reg* *8086-table-4-9*
+
+    Table 4-9~
+>
+  +-------+-------+-------+
+  |  REG  | W = 0 | W = 1 |
+  +-------+-------+-------+
+  |  000  |  AL   |  AX   |
+  |  001  |  CL   |  CX   |
+  |  010  |  DL   |  DX   |
+  |  011  |  BL   |  BX   |
+  |  100  |  AH   |  SP   |
+  |  101  |  CH   |  BP   |
+  |  110  |  DH   |  SI   |
+  |  111  |  BH   |  DI   |
+  +-------+-------+-------+
+<
+
+================================================================================
+4. R/M (Register/Memory) Field Encoding             *8086-rm* *8086-table-4-10*
+
+    Table 4-10~
+>
+  +-------+-------+-------++-------+----------------+----------------+----------------+
+  |       MOD = 11        ||          EFFECTIVE ADDRESS CALCULATION                    |
+  +-------+-------+-------++-------+----------------+----------------+----------------+
+  |  R/M  | W = 0 | W = 1 ||  R/M  |   MOD = 00     |   MOD = 01     |   MOD = 10     |
+  +-------+-------+-------++-------+----------------+----------------+----------------+
+  |  000  |  AL   |  AX   ||  000  | (BX)+(SI)      | (BX)+(SI)+D8   | (BX)+(SI)+D16  |
+  |  001  |  CL   |  CX   ||  001  | (BX)+(DI)      | (BX)+(DI)+D8   | (BX)+(DI)+D16  |
+  |  010  |  DL   |  DX   ||  010  | (BP)+(SI)      | (BP)+(SI)+D8   | (BP)+(SI)+D16  |
+  |  011  |  BL   |  BX   ||  011  | (BP)+(DI)      | (BP)+(DI)+D8   | (BP)+(DI)+D16  |
+  |  100  |  AH   |  SP   ||  100  | (SI)           | (SI)+D8        | (SI)+D16       |
+  |  101  |  CH   |  BP   ||  101  | (DI)           | (DI)+D8        | (DI)+D16       |
+  |  110  |  DH   |  SI   ||  110  | DIRECT ADDRESS | (BP)+D8        | (BP)+D16       |
+  |  111  |  BH   |  DI   ||  111  | (BX)           | (BX)+D8        | (BX)+D16       |
+  +-------+-------+-------++-------+----------------+----------------+----------------+
+<
+
+================================================================================
+5. Instruction Encoding (Table 4-12)                        *8086-table-4-12*
+
+5.1 DATA TRANSFER                              *8086-data-transfer*
+--------------------------------------------------------------------------------
+
+MOV = Move:~
+                                                            *8086-MOV*
+>
+  Register/memory to/from register    100010dw   mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        1100011w   mod 000 r/m  (DISP-LO)   (DISP-HI)   data        data if w=1
+  Immediate to register               1011wreg     data       data if w=1
+  Memory to accumulator               1010000w     addr-lo      addr-hi
+  Accumulator to memory               1010001w     addr-lo      addr-hi
+  Register/memory to segment register 10001110   mod 0 SR r/m  (DISP-LO)  (DISP-HI)
+  Segment register to register/memory 10001100   mod 0 SR r/m  (DISP-LO)  (DISP-HI)
+<
+
+PUSH = Push:~
+                                                            *8086-PUSH*
+>
+  Register/memory                     11111111   mod 110 r/m  (DISP-LO)   (DISP-HI)
+  Register                            01010 reg
+  Segment register                    000 reg 110
+<
+
+POP = Pop:~
+                                                            *8086-POP*
+>
+  Register/memory                     10001111   mod 000 r/m  (DISP-LO)   (DISP-HI)
+  Register                            01011 reg
+  Segment register                    000 reg 111
+<
+
+XCHG = Exchange:~
+                                                            *8086-XCHG*
+>
+  Register/memory with register       1000011w   mod reg r/m  (DISP-LO)   (DISP-HI)
+  Register with accumulator           10010 reg
+<
+
+IN = Input from:~
+                                                            *8086-IN*
+>
+  Fixed port                          1110010w     DATA-8
+  Variable port                       1110110w
+<
+
+OUT = Output to:~
+                                                            *8086-OUT*
+>
+  Fixed port                          1110011w     DATA-8
+  Variable port                       1110111w
+<
+                                        *8086-XLAT* *8086-LEA* *8086-LDS*
+                                        *8086-LES* *8086-LAHF* *8086-SAHF*
+                                        *8086-PUSHF* *8086-POPF*
+>
+  XLAT = Translate byte to AL         11010111
+  LEA  = Load EA to register          10001101   mod reg r/m  (DISP-LO)   (DISP-HI)
+  LDS  = Load pointer to DS           11000101   mod reg r/m  (DISP-LO)   (DISP-HI)
+  LES  = Load pointer to ES           11000100   mod reg r/m  (DISP-LO)   (DISP-HI)
+  LAHF = Load AH with flags           10011111
+  SAHF = Store AH into flags          10011110
+  PUSHF = Push flags                  10011100
+  POPF = Pop flags                    10011101
+<
+
+--------------------------------------------------------------------------------
+5.2 ARITHMETIC                                             *8086-arithmetic*
+--------------------------------------------------------------------------------
+
+ADD = Add:~
+                                                            *8086-ADD*
+>
+  Reg/memory with register to either  0000000dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        100000sw   mod 000 r/m  (DISP-LO)   (DISP-HI)   data        data if s:w=01
+  Immediate to accumulator            0000010w      data      data if w=1
+<
+
+ADC = Add with carry:~
+                                                            *8086-ADC*
+>
+  Reg/memory with register to either  0001000dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        100000sw   mod 010 r/m  (DISP-LO)   (DISP-HI)   data        data if s:w=01
+  Immediate to accumulator            0001010w      data      data if w=1
+<
+
+INC = Increment:~
+                                                            *8086-INC*
+>
+  Register/memory                     1111111w   mod 000 r/m  (DISP-LO)   (DISP-HI)
+  Register                            01000 reg
+<
+                                                *8086-AAA* *8086-DAA*
+>
+  AAA = ASCII adjust for add          00110111
+  DAA = Decimal adjust for add        00100111
+<
+
+SUB = Subtract:~
+                                                            *8086-SUB*
+>
+  Reg/memory and register to either   0010100dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate from register/memory      100000sw   mod 101 r/m  (DISP-LO)   (DISP-HI)   data        data if s:w=01
+  Immediate from accumulator          0010110w      data      data if w=1
+<
+
+SBB = Subtract with borrow:~
+                                                            *8086-SBB*
+>
+  Reg/memory and register to either   0001100dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate from register/memory      100000sw   mod 011 r/m  (DISP-LO)   (DISP-HI)   data        data if s:w=01
+  Immediate from accumulator          0001110w      data      data if w=1
+<
+
+DEC = Decrement:~
+                                                            *8086-DEC*
+>
+  Register/memory                     1111111w   mod 001 r/m  (DISP-LO)   (DISP-HI)
+  Register                            01001 reg
+<
+
+NEG = Change sign:~
+                                                            *8086-NEG*
+>
+  NEG                                 1111011w   mod 011 r/m  (DISP-LO)   (DISP-HI)
+<
+
+CMP = Compare:~
+                                                            *8086-CMP*
+>
+  Register/memory and register        0011100dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate with register/memory      100000sw   mod 111 r/m  (DISP-LO)   (DISP-HI)   data        data if s:w=1
+  Immediate with accumulator          0011110w      data
+<
+                                                *8086-AAS* *8086-DAS*
+>
+  AAS = ASCII adjust for subtract     00111111
+  DAS = Decimal adjust for subtract   00101111
+<
+                                    *8086-MUL* *8086-IMUL* *8086-AAM*
+                                    *8086-DIV* *8086-IDIV* *8086-AAD*
+                                    *8086-CBW* *8086-CWD*
+>
+  MUL  = Multiply (unsigned)          1111011w   mod 100 r/m  (DISP-LO)   (DISP-HI)
+  IMUL = Integer multiply (signed)    1111011w   mod 101 r/m  (DISP-LO)   (DISP-HI)
+  AAM  = ASCII adjust for multiply    11010100   00001010     (DISP-LO)   (DISP-HI)
+  DIV  = Divide (unsigned)            1111011w   mod 110 r/m  (DISP-LO)   (DISP-HI)
+  IDIV = Integer divide (signed)      1111011w   mod 111 r/m  (DISP-LO)   (DISP-HI)
+  AAD  = ASCII adjust for divide      11010101   00001010     (DISP-LO)   (DISP-HI)
+  CBW  = Convert byte to word         10011000
+  CWD  = Convert word to double word  10011001
+<
+
+--------------------------------------------------------------------------------
+5.3 LOGIC                                                  *8086-logic*
+--------------------------------------------------------------------------------
+                                    *8086-NOT* *8086-SHL* *8086-SAL*
+                                    *8086-SHR* *8086-SAR* *8086-ROL*
+                                    *8086-ROR* *8086-RCL* *8086-RCR*
+>
+  NOT     = Invert                    1111011w   mod 010 r/m  (DISP-LO)   (DISP-HI)
+  SHL/SAL = Shift log/arith left      110100vw   mod 100 r/m  (DISP-LO)   (DISP-HI)
+  SHR     = Shift logical right       110100vw   mod 101 r/m  (DISP-LO)   (DISP-HI)
+  SAR     = Shift arithmetic right    110100vw   mod 111 r/m  (DISP-LO)   (DISP-HI)
+  ROL     = Rotate left               110100vw   mod 000 r/m  (DISP-LO)   (DISP-HI)
+  ROR     = Rotate right              110100vw   mod 001 r/m  (DISP-LO)   (DISP-HI)
+  RCL     = Rotate thru carry left    110100vw   mod 010 r/m  (DISP-LO)   (DISP-HI)
+  RCR     = Rotate thru carry right   110100vw   mod 011 r/m  (DISP-LO)   (DISP-HI)
+<
+
+AND = And:~
+                                                            *8086-AND*
+>
+  Reg/memory with register to either  0010000dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        1000000w   mod 100 r/m  (DISP-LO)   (DISP-HI)   data        data if w=1
+  Immediate to accumulator            0010010w      data      data if w=1
+<
+
+TEST = And function to flags no result:~
+                                                            *8086-TEST*
+>
+  Register/memory and register        0000100dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate data and register/memory  1111011w   mod 000 r/m  (DISP-LO)   (DISP-HI)   data        data if w=1
+  Immediate data and accumulator      1010100w      data
+<
+
+OR = Or:~
+                                                            *8086-OR*
+>
+  Reg/memory and register to either   0000100dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        100000 0w  mod 001 r/m  (DISP-LO)   (DISP-HI)   data        data if w=1
+  Immediate to accumulator            0000110w      data      data if w=1
+<
+
+XOR = Exclusive or:~
+                                                            *8086-XOR*
+>
+  Reg/memory and register to either   0011000dw  mod reg r/m  (DISP-LO)   (DISP-HI)
+  Immediate to register/memory        0011010w      data      (DISP-LO)   (DISP-HI)   data        data if w=1
+  Immediate to accumulator            0011010w      data      data if w=1
+<
+
+--------------------------------------------------------------------------------
+5.4 STRING MANIPULATION                                    *8086-string*
+--------------------------------------------------------------------------------
+                                    *8086-REP* *8086-MOVS* *8086-CMPS*
+                                    *8086-SCAS* *8086-LODS* *8086-STDS*
+>
+  REP  = Repeat                       1111001z
+  MOVS = Move byte/word               1010010w
+  CMPS = Compare byte/word            1010011w
+  SCAS = Scan byte/word               1010111w
+  LODS = Load byte/wd to AL/AX        1010110w
+  STDS = Stor byte/wd from AL/A       1010101w
+<
+
+--------------------------------------------------------------------------------
+5.5 CONTROL TRANSFER                                       *8086-control*
+--------------------------------------------------------------------------------
+
+CALL = Call:~
+                                                            *8086-CALL*
+>
+  Direct within segment               11101000     IP-INC-LO    IP-INC-HI
+  Indirect within segment             11111111   mod 010 r/m  (DISP-LO)   (DISP-HI)
+  Direct intersegment                 10011010     IP-lo          IP-hi
+                                                    CS-lo          CS-hi
+  Indirect intersegment               11111111   mod 011 r/m  (DISP-LO)   (DISP-HI)
+<
+
+JMP = Unconditional Jump:~
+                                                            *8086-JMP*
+>
+  Direct within segment               11101001     IP-INC-LO    IP-INC-HI
+  Direct within segment-short         11101011     IP-INC8
+  Indirect within segment             11111111   mod 100 r/m  (DISP-LO)   (DISP-HI)
+  Direct intersegment                 11101010     IP-lo          IP-hi
+                                                    CS-lo          CS-hi
+  Indirect intersegment               11111111   mod 101 r/m  (DISP-LO)   (DISP-HI)
+<
+
+RET = Return from CALL:~
+                                                            *8086-RET*
+>
+  Within segment                      11000011
+  Within seg adding immed to SP       11000010     data-lo       data-hi
+  Intersegment                        11001011
+  Intersegment adding immediate to SP 11001010     data-lo       data-hi
+<
+
+Conditional Jumps:~
+                                    *8086-JE* *8086-JZ* *8086-JL* *8086-JNGE*
+                                    *8086-JLE* *8086-JNG* *8086-JB* *8086-JNAE*
+                                    *8086-JBE* *8086-JNA* *8086-JP* *8086-JPE*
+                                    *8086-JO* *8086-JS* *8086-JNE* *8086-JNZ*
+                                    *8086-JNL* *8086-JGE* *8086-JNLE* *8086-JG*
+                                    *8086-JNB* *8086-JAE* *8086-JNBE* *8086-JA*
+                                    *8086-JNP* *8086-JPO* *8086-JNO* *8086-JNS*
+>
+  JE/JZ    = Jump on equal/zero                   01110100     IP-INC8
+  JL/JNGE  = Jump on less/not greater or equal    01111100     IP-INC8
+  JLE/JNG  = Jump on less or equal/not greater    01111110     IP-INC8
+  JB/JNAE  = Jump on below/not above or equal     01110010     IP-INC8
+  JBE/JNA  = Jump on below or equal/not above     01110110     IP-INC8
+  JP/JPE   = Jump on parity/parity even           01111010     IP-INC8
+  JO       = Jump on overflow                     01110000     IP-INC8
+  JS       = Jump on sign                         01111000     IP-INC8
+  JNE/JNZ  = Jump on not equal/not zero           01110101     IP-INC8
+  JNL/JGE  = Jump on not less/greater or equal    01111101     IP-INC8
+  JNLE/JG  = Jump on not less or equal/greater    01111111     IP-INC8
+  JNB/JAE  = Jump on not below/above or equal     01110011     IP-INC8
+  JNBE/JA  = Jump on not below or equal/above     01110111     IP-INC8
+  JNP/JPO  = Jump on not par/par odd              01111011     IP-INC8
+  JNO      = Jump on not overflow                 01110001     IP-INC8
+  JNS      = Jump on not sign                     01111001     IP-INC8
+<
+
+Loops:~
+                                    *8086-LOOP* *8086-LOOPZ* *8086-LOOPE*
+                                    *8086-LOOPNZ* *8086-LOOPNE* *8086-JCXZ*
+>
+  LOOP          = Loop CX times                   11100010     IP-INC8
+  LOOPZ/LOOPE   = Loop while zero/equal           11100001     IP-INC8
+  LOOPNZ/LOOPNE = Loop while not zero/equal       11100000     IP-INC8
+  JCXZ          = Jump on CX zero                 11100011     IP-INC8
+<
+
+--------------------------------------------------------------------------------
+5.6 INTERRUPT                                              *8086-interrupt*
+--------------------------------------------------------------------------------
+                                                *8086-INT* *8086-INTO* *8086-IRET*
+>
+  INT  = Type specified               11001101     DATA-8
+  INT  = Type 3                       11001100
+  INTO = Interrupt on overflow        11001110
+  IRET = Interrupt return             11001111
+<
+
+--------------------------------------------------------------------------------
+5.7 PROCESSOR CONTROL                              *8086-processor-control*
+--------------------------------------------------------------------------------
+                                    *8086-CLC* *8086-CMC* *8086-STC*
+                                    *8086-CLD* *8086-STD* *8086-CLI*
+                                    *8086-STI* *8086-HLT* *8086-WAIT*
+                                    *8086-ESC* *8086-LOCK* *8086-SEGMENT*
+>
+  CLC     = Clear carry               11111000
+  CMC     = Complement carry           11110101
+  STC     = Set carry                  11111001
+  CLD     = Clear direction            11111100
+  STD     = Set direction              11111101
+  CLI     = Clear interrupt            11111010
+  STI     = Set interrupt              11111011
+  HLT     = Halt                       11110100
+  WAIT    = Wait                       10011011
+  ESC     = Escape (to external dev)   11011xxx   mod yyy r/m  (DISP-LO)   (DISP-HI)
+  LOCK    = Bus lock prefix            11110000
+  SEGMENT = Override prefix            001 reg 110
+<
+
+================================================================================
+ vim:tw=80:ts=8:ft=help:norl:
