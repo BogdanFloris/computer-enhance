@@ -1,11 +1,19 @@
 #pragma once
+/*
+ * Instruction decoding for the 8086 instruction set.
+ * Please see ./doc/8086.txt for the reference.
+ */
 
 #include <cstdint>
+#include <ostream>
 #include <vector>
 
 enum Op : uint8_t {
     mov,
 };
+
+Op decode_op(uint8_t byte);
+std::ostream& operator<<(std::ostream& os, const Op& op);
 
 enum Reg : uint8_t {
     al, // 000 W=0
@@ -26,12 +34,32 @@ enum Reg : uint8_t {
     di, // 111 W=1
 };
 
-// Instruction decoding for the 8086 instruction set.
-// Please see ./doc/8086.txt for the reference.
-struct Instruction {
-    Op op;
-    Reg src;
-    Reg dst;
+Reg decode_reg(uint8_t regByte, uint8_t wByte);
+std::ostream& operator<<(std::ostream& os, const Reg& reg);
+
+struct DstReg {
+    Reg reg;
 };
 
-std::vector<Instruction> decode(const std::vector<uint8_t>&);
+struct SrcReg {
+    Reg reg;
+};
+
+class Instruction {
+  public:
+    Instruction() = delete;
+    Instruction(Op op, DstReg dst, SrcReg src) : mOp(op), mDst(dst.reg), mSrc(src.reg) {}
+
+    static std::vector<Instruction> decode(const std::vector<uint8_t>&);
+
+    [[nodiscard]] Op op() const { return mOp; }
+    [[nodiscard]] Reg dst() const { return mDst; }
+    [[nodiscard]] Reg src() const { return mSrc; }
+
+  private:
+    Op mOp;
+    Reg mDst;
+    Reg mSrc;
+};
+
+std::ostream& operator<<(std::ostream& os, const Instruction& inst);
