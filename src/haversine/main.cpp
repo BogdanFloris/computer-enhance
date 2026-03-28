@@ -1,6 +1,6 @@
-#include <cstdio>
+#include <iostream>
 
 int main(int argc, char* argv[]) {
-    std::printf("haversine: Haversine distance processor\n");
+    std::cout << "haversine: Haversine distance processor\n";
     return 0;
 }

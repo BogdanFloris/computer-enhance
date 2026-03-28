@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <chrono>
 
 namespace profiler {
 
@@ -14,8 +13,7 @@ inline uint64_t read_cpu_timer() {
     return val;
 #else
     auto now = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now.time_since_epoch()).count();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 #endif
 }
 
