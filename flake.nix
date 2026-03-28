@@ -17,6 +17,8 @@
             clang
             clang-tools
             cmake
+            gtest
+            nasm
             ninja
           ];
         };

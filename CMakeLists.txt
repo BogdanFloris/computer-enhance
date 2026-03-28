@@ -12,3 +12,6 @@ endif()
 
 add_subdirectory(src/sim8086)
 add_subdirectory(src/haversine)
+
+enable_testing()
+add_subdirectory(src/sim8086/tests)
