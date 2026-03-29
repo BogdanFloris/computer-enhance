@@ -23,3 +23,7 @@ After running `ning -C build`:
 ```bash
 ctest --test-dir build --output-on-failure
 ```
+
+## Some links with issues with implementation:
+
+https://www.computerenhance.com/p/instruction-decoding-on-the-8086/comment/16363456

@@ -5,7 +5,9 @@
  */
 
 #include <cstdint>
+#include <memory>
 #include <ostream>
+#include <span>
 #include <vector>
 
 enum Op : uint8_t {
@@ -61,7 +63,7 @@ class Instruction {
     Reg mDst;
     Reg mSrc;
 
-    static Instruction decode(const std::array<uint8_t, 2>& bytes);
+    static Instruction decode(std::span<const uint8_t>& bytes);
 };
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst);

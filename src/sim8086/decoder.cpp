@@ -1,19 +1,23 @@
 #include <cstdint>
-#include <stdexcept>
-
 #include <decoder.hpp>
+#include <span>
+#include <stdexcept>
 
 std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& bytes) {
     std::vector<Instruction> instructions{};
     instructions.reserve(bytes.size() / 2);
-    for (size_t i = 0; i < bytes.size(); i += 2) {
-        instructions.push_back(Instruction::decode({bytes[i], bytes[i + 1]}));
+    std::span<const uint8_t> remaining{bytes};
+    while (!remaining.empty()) {
+        if (remaining.size() < 2) {
+            throw std::runtime_error("truncated instruction stream");
+        }
+        instructions.push_back(Instruction::decode(remaining));
     }
 
     return instructions;
 }
 
-Instruction Instruction::decode(const std::array<uint8_t, 2>& bytes) {
+Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     auto op = decode_op(bytes[0]);
     uint8_t w = bytes[0] & 0x01;
     uint8_t d = (bytes[0] >> 1) & 0x01;
@@ -22,6 +26,7 @@ Instruction Instruction::decode(const std::array<uint8_t, 2>& bytes) {
     auto rm = decode_reg(bytes[1] & 0x7, w);
     auto src = (d != 0U) ? rm : reg;
     auto dst = (d != 0U) ? reg : rm;
+    bytes = bytes.subspan(2);
 
     return Instruction(op, DstReg{dst}, SrcReg{src});
 }
