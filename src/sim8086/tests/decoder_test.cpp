@@ -5,8 +5,8 @@
 
 struct Expected {
     Op op;
-    Reg dst;
-    Reg src;
+    Operand dst;
+    Operand src;
 };
 
 TEST(Decoder, Listing37) {

@@ -2,6 +2,8 @@
 #include <decoder.hpp>
 #include <span>
 #include <stdexcept>
+#include <type_traits>
+#include <variant>
 
 std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& bytes) {
     std::vector<Instruction> instructions{};
@@ -28,7 +30,7 @@ Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     auto dst = (d != 0U) ? reg : rm;
     bytes = bytes.subspan(2);
 
-    return Instruction(op, DstReg{dst}, SrcReg{src});
+    return {op, Operand{dst}, Operand{src}, w != 0U};
 }
 
 Op decode_op(uint8_t byte) {
@@ -64,6 +66,47 @@ std::ostream& operator<<(std::ostream& os, const Reg& reg) {
         return os << names.at(i);
     }
     return os << "unknown";
+}
+
+std::ostream& operator<<(std::ostream& os, const Memory& memory) {
+    os << "[";
+    bool needs_sep = false;
+
+    if (memory.base) {
+        os << memory.base.value();
+        needs_sep = true;
+    }
+    if (memory.index) {
+        if (needs_sep) {
+            os << " + ";
+        }
+        os << memory.index.value();
+        needs_sep = true;
+    }
+    if (memory.disp != 0 || !needs_sep) {
+        if (needs_sep) {
+            if (memory.disp >= 0) {
+                os << " + " << memory.disp;
+            } else {
+                os << " - " << -memory.disp;
+            }
+        } else {
+            os << memory.disp;
+        }
+    }
+
+    os << "]";
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Immediate& imm) {
+    os << imm.value;
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Operand& operand) {
+    std::visit([&os](const auto& v) { os << v; }, operand);
+    return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst) {

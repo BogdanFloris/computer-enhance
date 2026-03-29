@@ -5,9 +5,10 @@
  */
 
 #include <cstdint>
-#include <memory>
+#include <optional>
 #include <ostream>
 #include <span>
+#include <variant>
 #include <vector>
 
 enum Op : uint8_t {
@@ -39,29 +40,55 @@ enum Reg : uint8_t {
 Reg decode_reg(uint8_t regByte, uint8_t wByte);
 std::ostream& operator<<(std::ostream& os, const Reg& reg);
 
-struct DstReg {
-    Reg reg;
+struct Memory {
+    std::optional<Reg> base;  // bx, bp, si, di, or none (direct address)
+    std::optional<Reg> index; // si, di, or none
+    int16_t disp = 0;         // signed displacement
 };
+std::ostream& operator<<(std::ostream& os, const Memory& memory);
+inline bool operator==(const Memory& lhs, const Memory& rhs) {
+    return lhs.base == rhs.base && lhs.index == rhs.index && lhs.disp == rhs.index;
+}
 
-struct SrcReg {
-    Reg reg;
+struct Immediate {
+    uint16_t value;
+    bool wide;
 };
+std::ostream& operator<<(std::ostream& os, const Immediate& imm);
+inline bool operator==(const Immediate& lhs, const Immediate& rhs) {
+    return lhs.value == rhs.value && lhs.wide == rhs.wide;
+}
+
+using Operand = std::variant<Reg, Memory, Immediate>;
+std::ostream& operator<<(std::ostream& os, const Operand& operand);
+
+inline bool operator==(const Operand& op, Reg r) {
+    return std::holds_alternative<Reg>(op) && std::get<Reg>(op) == r;
+}
+inline bool operator==(const Operand& op, const Memory& m) {
+    return std::holds_alternative<Memory>(op) && std::get<Memory>(op) == m;
+}
+inline bool operator==(const Operand& op, const Immediate& i) {
+    return std::holds_alternative<Immediate>(op) && std::get<Immediate>(op) == i;
+}
 
 class Instruction {
   public:
     Instruction() = delete;
-    Instruction(Op op, DstReg dst, SrcReg src) : mOp(op), mDst(dst.reg), mSrc(src.reg) {}
+    Instruction(Op op, Operand dst, Operand src, bool wide)
+        : mOp(op), mDst(dst), mSrc(src), mWide(wide) {}
 
     static std::vector<Instruction> decode_bytes(const std::vector<uint8_t>& bytes);
 
     [[nodiscard]] Op op() const { return mOp; }
-    [[nodiscard]] Reg dst() const { return mDst; }
-    [[nodiscard]] Reg src() const { return mSrc; }
+    [[nodiscard]] Operand dst() const { return mDst; }
+    [[nodiscard]] Operand src() const { return mSrc; }
 
   private:
     Op mOp;
-    Reg mDst;
-    Reg mSrc;
+    Operand mDst;
+    Operand mSrc;
+    bool mWide;
 
     static Instruction decode(std::span<const uint8_t>& bytes);
 };
