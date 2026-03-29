@@ -8,15 +8,9 @@
 #include <optional>
 #include <ostream>
 #include <span>
+#include <table.hpp>
 #include <variant>
 #include <vector>
-
-enum Op : uint8_t {
-    mov,
-};
-
-Op decode_op(uint8_t byte);
-std::ostream& operator<<(std::ostream& os, const Op& op);
 
 enum Reg : uint8_t {
     al, // 000 W=0
@@ -45,6 +39,22 @@ enum DispType : uint8_t {
     disp_hi,
 };
 
+struct EABase {
+    std::optional<Reg> base;
+    std::optional<Reg> index;
+};
+
+constexpr std::array<EABase, 8> ea_table = {{
+    {.base = bx, .index = si},           // 000
+    {.base = bx, .index = di},           // 001
+    {.base = bp, .index = si},           // 010
+    {.base = bp, .index = di},           // 011
+    {.base = std::nullopt, .index = si}, // 100
+    {.base = std::nullopt, .index = di}, // 101
+    {.base = bp, .index = std::nullopt}, // 110 (when MOD=00: direct address)
+    {.base = bx, .index = std::nullopt}, // 111
+}};
+
 struct Memory {
     std::optional<Reg> base;  // bx, bp, si, di, or none (direct address)
     std::optional<Reg> index; // si, di, or none
@@ -67,6 +77,10 @@ inline bool operator==(const Immediate& lhs, const Immediate& rhs) {
 }
 
 using Operand = std::variant<Reg, Memory, Immediate>;
+
+Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w, const Operand& reg_operand,
+                        const Operand& rm_operand, std::span<const uint8_t>& bytes, size_t& offset);
+
 std::ostream& operator<<(std::ostream& os, const Operand& operand);
 
 inline bool operator==(const Operand& op, Reg r) {

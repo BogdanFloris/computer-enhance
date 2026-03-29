@@ -19,52 +19,102 @@ std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& b
 }
 
 Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
-    auto op = decode_op(bytes[0]);
-    uint8_t w = bytes[0] & 0x01;
-    uint8_t d = (bytes[0] >> 1) & 0x01;
-    uint8_t mod = (bytes[1] >> 6) & 0x3;
-    auto reg = decode_reg(bytes[1], w);
-    auto rm = decode_rm(bytes[1] & 0x7, mod, w);
-    auto src = (d != 0U) ? rm : reg;
-    auto dst = (d != 0U) ? reg : rm;
+    auto info = opcode_table.at(bytes[0]);
+    uint8_t w = ((bytes[0] & info.w_mask) != 0) ? 1 : 0;
 
-    bytes = bytes.subspan(2);
-    return {op, Operand{dst}, Operand{src}, w != 0U};
+    Operand reg_operand;
+    Operand rm_operand;
+    size_t offset = 1;
+
+    uint8_t d = (bytes[0] >> 1) & 0x01;
+
+    if (info.has_modrm) {
+        reg_operand = decode_reg((bytes[1] >> 3) & 0x7, w);
+        rm_operand = decode_rm(bytes[1] & 0x7, (bytes[1] >> 6) & 0x3, w);
+        offset = 2;
+        if (auto* v = std::get_if<Memory>(&rm_operand)) {
+            switch (v->disp_type) {
+            case no_disp:
+                break;
+            case disp_lo:
+                v->disp = static_cast<int16_t>(static_cast<int8_t>(bytes[2])); // NOLINT
+                offset = 3;
+                break;
+            case disp_hi:
+                v->disp =
+                    static_cast<int16_t>(static_cast<uint16_t>(bytes[3]) << 8) | bytes[2]; // NOLINT
+                offset = 4;
+                break;
+            }
+        }
+    }
+
+    Operand dst = resolve_operand(info.dst, bytes[0], w, reg_operand, rm_operand, bytes, offset);
+    Operand src = resolve_operand(info.src, bytes[0], w, reg_operand, rm_operand, bytes, offset);
+    bytes = bytes.subspan(offset);
+    return {info.op, Operand{dst}, Operand{src}, w != 0U};
 }
 
-Op decode_op(uint8_t byte) {
-    switch (byte) {
-    case 0x88:
-    case 0x89:
-    case 0x8A:
-    case 0x8B:
-        return mov;
-    default:
-        throw std::runtime_error("unknown opcode");
+Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,
+                        const Operand& reg_operand, // pre-decoded from REG field (if has_modrm)
+                        const Operand& rm_operand,  // pre-decoded from R/M field (if has_modrm)
+                        std::span<const uint8_t>& bytes, size_t& offset) {
+    switch (source) {
+    case OpSource::reg:
+        return reg_operand;
+    case OpSource::rm:
+        return rm_operand;
+    case OpSource::opcode_reg:
+        return decode_reg(opcode & 0x07, w);
+    case OpSource::imm: { /* read immediate, advance offset */
+        Immediate imm{};
+        imm.wide = (w != 0);
+        if (imm.wide) {
+            imm.value = static_cast<uint16_t>(bytes[offset]) |
+                        (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+            offset += 2;
+        } else {
+            imm.value = bytes[offset];
+            offset += 1;
+        }
+        return imm;
+    }
+    case OpSource::acc:
+        return decode_reg(0, w); // AL or AX
+    case OpSource::addr:
+        int16_t addr = static_cast<int16_t>(bytes[offset]) |           // NOLINT
+                       (static_cast<int16_t>(bytes[offset + 1]) << 8); // NOLINT
+        offset += 2;
+        return Memory{
+            .base = std::nullopt, .index = std::nullopt, .disp = addr, .disp_type = disp_hi};
     }
 }
 
-Operand decode_reg(uint8_t byte, uint8_t wByte) {
-    return Operand{static_cast<Reg>(((byte >> 3) & 0x7 << 1) | wByte)};
+Operand decode_reg(uint8_t regByte, uint8_t wByte) {
+    return Operand{static_cast<Reg>((regByte << 1) | wByte)};
 }
 
 Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte) {
-    Operand rm;
-    switch (mod) {
-        case 0b00:
-    case 0b11:
+    if (mod == 0b11) {
         return decode_reg(rmByte, wByte);
-    default:
-        throw std::runtime_error("invalid mod");
-    };
-}
-
-std::ostream& operator<<(std::ostream& os, const Op& op) {
-    static constexpr std::array ops = {"mov"};
-    if (auto i = static_cast<std::size_t>(op); i < ops.size()) {
-        return os << ops.at(i);
     }
-    return os << "unknown";
+
+    if (mod == 0b00 && rmByte == 0b110) {
+        return Memory{.base = std::nullopt,
+                      .index = std::nullopt,
+                      .disp = 0,
+                      .disp_type = disp_hi}; // direct address
+    }
+
+    constexpr std::array<DispType, 3> disp_types = {no_disp, disp_lo, disp_hi};
+
+    const auto& ea = ea_table.at(rmByte);
+    auto mem = Memory{
+        .base = ea.base,
+        .index = ea.index,
+    };
+    mem.disp_type = disp_types.at(mod);
+    return Operand{mem};
 }
 
 std::ostream& operator<<(std::ostream& os, const Reg& reg) {
@@ -110,7 +160,12 @@ std::ostream& operator<<(std::ostream& os, const Memory& memory) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Immediate& imm) {
-    os << imm.value;
+    if (imm.wide) {
+        os << static_cast<int16_t>(imm.value);
+    } else {
+        // Cast to int8_t first to sign-extend, then to int for printing
+        os << static_cast<int>(static_cast<int8_t>(imm.value));
+    }
     return os;
 }
 
@@ -120,5 +175,16 @@ std::ostream& operator<<(std::ostream& os, const Operand& operand) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst) {
-    return os << inst.op() << " " << inst.dst() << ", " << inst.src();
+    os << inst.op() << " " << inst.dst() << ", ";
+
+    // Need byte/word prefix when moving immediate to memory
+    const auto& src = inst.src();
+    if (std::holds_alternative<Memory>(inst.dst()) &&
+        std::holds_alternative<Immediate>(src)) {
+        const auto& imm = std::get<Immediate>(src);
+        os << (imm.wide ? "word " : "byte ");
+    }
+
+    os << inst.src();
+    return os;
 }
