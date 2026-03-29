@@ -110,5 +110,5 @@ std::ostream& operator<<(std::ostream& os, const Operand& operand) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst) {
-    return os << inst.op() << " " << inst.dst() << "," << inst.src();
+    return os << inst.op() << " " << inst.dst() << ", " << inst.src();
 }
