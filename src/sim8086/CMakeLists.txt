@@ -1,5 +1,6 @@
 add_library(sim8086_lib
     decoder.cpp
+    table.cpp
     # simulator.cpp
 )
 target_include_directories(sim8086_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
