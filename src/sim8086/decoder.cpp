@@ -1,13 +1,37 @@
-#include <decoder.hpp>
+#include <cstdint>
 #include <stdexcept>
 
-std::vector<Instruction> Instruction::decode(const std::vector<uint8_t>& bytes) {
-    return {Instruction(mov, DstReg{cx}, SrcReg{bx})};
+#include <decoder.hpp>
+
+std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& bytes) {
+    std::vector<Instruction> instructions{};
+    instructions.reserve(bytes.size() / 2);
+    for (size_t i = 0; i < bytes.size(); i += 2) {
+        instructions.push_back(Instruction::decode({bytes[i], bytes[i + 1]}));
+    }
+
+    return instructions;
+}
+
+Instruction Instruction::decode(const std::array<uint8_t, 2>& bytes) {
+    auto op = decode_op(bytes[0]);
+    uint8_t w = bytes[0] & 0x01;
+    uint8_t d = (bytes[0] >> 1) & 0x01;
+    uint8_t mod = (bytes[1] >> 6) & 0x3;
+    auto reg = decode_reg((bytes[1] >> 3) & 0x7, w);
+    auto rm = decode_reg(bytes[1] & 0x7, w);
+    auto src = (d != 0U) ? rm : reg;
+    auto dst = (d != 0U) ? reg : rm;
+
+    return Instruction(op, DstReg{dst}, SrcReg{src});
 }
 
 Op decode_op(uint8_t byte) {
     switch (byte) {
     case 0x88:
+    case 0x89:
+    case 0x8A:
+    case 0x8B:
         return mov;
     default:
         throw std::runtime_error("unknown opcode");

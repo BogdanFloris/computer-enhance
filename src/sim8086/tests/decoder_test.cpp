@@ -11,7 +11,7 @@ struct Expected {
 
 TEST(Decoder, Listing37) {
     std::vector<uint8_t> bytes = {0x89, 0xd9}; // mov cx,bx
-    auto instructions = Instruction::decode(bytes);
+    auto instructions = Instruction::decode_bytes(bytes);
     EXPECT_EQ(instructions[0].op(), mov);
     EXPECT_EQ(instructions[0].dst(), cx);
     EXPECT_EQ(instructions[0].src(), bx);
@@ -23,7 +23,7 @@ TEST(Decoder, Listing38) {
         0xC8, 0x88, 0xED, 0x89, 0xC3, 0x89, 0xF3, 0x89, 0xFC, 0x89, 0xC5,
     };
 
-    auto instructions = Instruction::decode(bytes);
+    auto instructions = Instruction::decode_bytes(bytes);
 
     std::array<Expected, 11> expected = {{
         {.op = mov, .dst = cx, .src = bx},

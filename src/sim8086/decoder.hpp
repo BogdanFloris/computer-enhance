@@ -50,7 +50,7 @@ class Instruction {
     Instruction() = delete;
     Instruction(Op op, DstReg dst, SrcReg src) : mOp(op), mDst(dst.reg), mSrc(src.reg) {}
 
-    static std::vector<Instruction> decode(const std::vector<uint8_t>&);
+    static std::vector<Instruction> decode_bytes(const std::vector<uint8_t>& bytes);
 
     [[nodiscard]] Op op() const { return mOp; }
     [[nodiscard]] Reg dst() const { return mDst; }
@@ -60,6 +60,8 @@ class Instruction {
     Op mOp;
     Reg mDst;
     Reg mSrc;
+
+    static Instruction decode(const std::array<uint8_t, 2>& bytes);
 };
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst);
