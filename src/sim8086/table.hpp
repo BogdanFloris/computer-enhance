@@ -26,6 +26,12 @@ struct OpcodeInfo {
     uint8_t w_mask; // which bit is W? (0x01 or 0x08)
 };
 
+// d = 0: The REG field in the instruction specifies the source operand,
+//        and the R/M field specifies the destination.
+//        So the operation goes from REG to R/M.
+// d = 1: The REG field specifies the destination, and the R/M field
+//        specifies the source.
+//        So the operation goes from R/M to REG.
 constexpr std::array<OpcodeInfo, 256> make_opcode_table() {
     std::array<OpcodeInfo, 256> t{};
 
@@ -73,10 +79,10 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table() {
     // Immediate to r/m (0xC6, 0xC7)
     for (uint8_t i = 0xC6; i <= 0xC7; ++i) {
         t.at(i) = {.op = mov,
-                .dst = OpSource::rm,
-                .src = OpSource::imm,
-                .has_modrm = true,
-                .w_mask = 0x01};
+                   .dst = OpSource::rm,
+                   .src = OpSource::imm,
+                   .has_modrm = true,
+                   .w_mask = 0x01};
     }
 
     return t;
