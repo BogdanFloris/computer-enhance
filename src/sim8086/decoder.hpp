@@ -37,17 +37,24 @@ enum Reg : uint8_t {
     di, // 111 W=1
 };
 
-Reg decode_reg(uint8_t regByte, uint8_t wByte);
 std::ostream& operator<<(std::ostream& os, const Reg& reg);
+
+enum DispType : uint8_t {
+    no_disp,
+    disp_lo,
+    disp_hi,
+};
 
 struct Memory {
     std::optional<Reg> base;  // bx, bp, si, di, or none (direct address)
     std::optional<Reg> index; // si, di, or none
     int16_t disp = 0;         // signed displacement
+    DispType disp_type;       // type of displacement
 };
 std::ostream& operator<<(std::ostream& os, const Memory& memory);
 inline bool operator==(const Memory& lhs, const Memory& rhs) {
-    return lhs.base == rhs.base && lhs.index == rhs.index && lhs.disp == rhs.index;
+    return lhs.base == rhs.base && lhs.index == rhs.index && lhs.disp == rhs.index &&
+           lhs.disp_type == rhs.disp_type;
 }
 
 struct Immediate {
@@ -71,6 +78,9 @@ inline bool operator==(const Operand& op, const Memory& m) {
 inline bool operator==(const Operand& op, const Immediate& i) {
     return std::holds_alternative<Immediate>(op) && std::get<Immediate>(op) == i;
 }
+
+Operand decode_reg(uint8_t regByte, uint8_t wByte);
+Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte);
 
 class Instruction {
   public:

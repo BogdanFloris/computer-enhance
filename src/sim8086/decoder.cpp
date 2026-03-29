@@ -2,7 +2,6 @@
 #include <decoder.hpp>
 #include <span>
 #include <stdexcept>
-#include <type_traits>
 #include <variant>
 
 std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& bytes) {
@@ -24,12 +23,12 @@ Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     uint8_t w = bytes[0] & 0x01;
     uint8_t d = (bytes[0] >> 1) & 0x01;
     uint8_t mod = (bytes[1] >> 6) & 0x3;
-    auto reg = decode_reg((bytes[1] >> 3) & 0x7, w);
-    auto rm = decode_reg(bytes[1] & 0x7, w);
+    auto reg = decode_reg(bytes[1], w);
+    auto rm = decode_rm(bytes[1] & 0x7, mod, w);
     auto src = (d != 0U) ? rm : reg;
     auto dst = (d != 0U) ? reg : rm;
-    bytes = bytes.subspan(2);
 
+    bytes = bytes.subspan(2);
     return {op, Operand{dst}, Operand{src}, w != 0U};
 }
 
@@ -45,8 +44,19 @@ Op decode_op(uint8_t byte) {
     }
 }
 
-Reg decode_reg(uint8_t regByte, uint8_t wByte) {
-    return static_cast<Reg>((regByte << 1) | wByte);
+Operand decode_reg(uint8_t byte, uint8_t wByte) {
+    return Operand{static_cast<Reg>(((byte >> 3) & 0x7 << 1) | wByte)};
+}
+
+Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte) {
+    Operand rm;
+    switch (mod) {
+        case 0b00:
+    case 0b11:
+        return decode_reg(rmByte, wByte);
+    default:
+        throw std::runtime_error("invalid mod");
+    };
 }
 
 std::ostream& operator<<(std::ostream& os, const Op& op) {
