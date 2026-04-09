@@ -20,9 +20,13 @@ std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& b
     return instructions;
 }
 
+// Group 1 opcodes: REG field determines operation
+constexpr std::array<Op, 8> group1_ops = {add, add, add, add, add, sub, add, cmp};
+
 Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     auto info = opcode_table.at(bytes[0]);
     uint8_t w = ((bytes[0] & info.w_mask) != 0) ? 1 : 0;
+    uint8_t imm_w = w; // width for immediate operand
 
     Operand reg_operand;
     Operand rm_operand;
@@ -51,10 +55,23 @@ Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
         }
     }
 
+    // Handle group 1 opcodes (0x80, 0x81, 0x83)
+    Op op = info.op;
+    uint8_t opcode = bytes[0];
+    if (opcode == 0x80 || opcode == 0x81 || opcode == 0x83) {
+        uint8_t reg_field = (bytes[1] >> 3) & 0x7;
+        op = group1_ops.at(reg_field);
+        // 0x83: sign-extended 8-bit immediate to 16-bit
+        if (opcode == 0x83) {
+            imm_w = 0; // read 8-bit immediate
+        }
+    }
+
     Operand dst = resolve_operand(info.dst, bytes[0], w, reg_operand, rm_operand, bytes, offset);
-    Operand src = resolve_operand(info.src, bytes[0], w, reg_operand, rm_operand, bytes, offset);
+    Operand src =
+        resolve_operand(info.src, bytes[0], imm_w, reg_operand, rm_operand, bytes, offset);
     bytes = bytes.subspan(offset);
-    return {info.op, Operand{dst}, Operand{src}, w != 0U};
+    return {op, Operand{dst}, Operand{src}, w != 0U};
 }
 
 Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,
@@ -200,11 +217,10 @@ std::ostream& operator<<(std::ostream& os, const Instruction& inst) {
         os << ", ";
     }
 
-    // Need byte/word prefix when moving immediate to memory
+    // Need byte/word prefix when operating on immediate to memory
     const auto& src = inst.src();
     if (std::holds_alternative<Memory>(inst.dst()) && std::holds_alternative<Immediate>(src)) {
-        const auto& imm = std::get<Immediate>(src);
-        os << (imm.wide ? "word " : "byte ");
+        os << (inst.wide() ? "word " : "byte ");
     }
 
     os << inst.src();

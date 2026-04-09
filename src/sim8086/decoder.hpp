@@ -109,6 +109,7 @@ class Instruction {
     [[nodiscard]] Op op() const { return mOp; }
     [[nodiscard]] Operand dst() const { return mDst; }
     [[nodiscard]] Operand src() const { return mSrc; }
+    [[nodiscard]] bool wide() const { return mWide; }
 
   private:
     Op mOp;

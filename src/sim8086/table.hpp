@@ -111,6 +111,57 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table() {
                    .w_mask = 0x01};
     }
 
+    // ADD 0x00-0x05
+    t[0x00] = {
+        .op = add, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x01] = {
+        .op = add, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x02] = {
+        .op = add, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x03] = {
+        .op = add, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x04] = {
+        .op = add, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+    t[0x05] = {
+        .op = add, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+
+    // SUB 0x28-0x2D
+    t[0x28] = {
+        .op = sub, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x29] = {
+        .op = sub, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x2A] = {
+        .op = sub, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x2B] = {
+        .op = sub, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x2C] = {
+        .op = sub, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+    t[0x2D] = {
+        .op = sub, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+
+    // CMP 0x38-0x3D
+    t[0x38] = {
+        .op = cmp, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x39] = {
+        .op = cmp, .dst = OpSource::rm, .src = OpSource::reg, .has_modrm = true, .w_mask = 0x01};
+    t[0x3A] = {
+        .op = cmp, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x3B] = {
+        .op = cmp, .dst = OpSource::reg, .src = OpSource::rm, .has_modrm = true, .w_mask = 0x01};
+    t[0x3C] = {
+        .op = cmp, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+    t[0x3D] = {
+        .op = cmp, .dst = OpSource::acc, .src = OpSource::imm, .has_modrm = false, .w_mask = 0x01};
+
+    // Group 1: 0x80/0x81/0x83 - op determined by REG field (handled in decoder)
+    // REG=0: ADD, REG=5: SUB, REG=7: CMP
+    t[0x80] = {
+        .op = add, .dst = OpSource::rm, .src = OpSource::imm, .has_modrm = true, .w_mask = 0x01};
+    t[0x81] = {
+        .op = add, .dst = OpSource::rm, .src = OpSource::imm, .has_modrm = true, .w_mask = 0x01};
+    t[0x83] = {
+        .op = add, .dst = OpSource::rm, .src = OpSource::imm, .has_modrm = true, .w_mask = 0x01};
+
     // Conditional jumps 0x70-0x7F
     t[0x70] = {
         .op = jo, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
