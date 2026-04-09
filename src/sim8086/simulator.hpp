@@ -5,8 +5,12 @@
 
 #include "decoder.hpp"
 
+#include <cstdint>
 #include <vector>
 
+inline size_t reg_index(Reg r) {
+    return r / 2;
+}
 using Registers = std::array<uint16_t, 8>;
 
 struct Simulator {
@@ -20,7 +24,8 @@ struct Simulator {
     [[nodiscard]] Registers registers() const { return mRegisters; }
 
   private:
-
+    uint16_t read_operand(const Operand& op);
+    void write_operand(const Operand& op, uint16_t val);
     std::vector<Instruction> mInstructions;
     Registers mRegisters;
 };

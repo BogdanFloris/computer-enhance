@@ -9,7 +9,6 @@
 struct SimulatorTestCase {
     std::string name;
     std::vector<uint8_t> bytes;
-    // ax bx cx dx sp bp si di
     Registers expectedRegs;
 };
 
@@ -37,9 +36,9 @@ INSTANTIATE_TEST_SUITE_P(
                                       },
                                       {
                                           0x0001,
-                                          0x0002,
                                           0x0003,
                                           0x0004,
+                                          0x0002,
                                           0x0005,
                                           0x0006,
                                           0x0007,
@@ -55,9 +54,9 @@ INSTANTIATE_TEST_SUITE_P(
                                       },
                                       {
                                           0x0004,
-                                          0x0003,
                                           0x0002,
                                           0x0001,
+                                          0x0003,
                                           0x0001,
                                           0x0002,
                                           0x0003,
