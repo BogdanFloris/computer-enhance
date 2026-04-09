@@ -2,6 +2,7 @@ find_package(GTest REQUIRED)
 
 add_executable(sim8086_tests
     decoder_test.cpp
+    simulator_test.cpp
 )
 
 target_link_libraries(sim8086_tests GTest::gtest GTest::gtest_main sim8086_lib)
