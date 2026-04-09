@@ -1,12 +1,25 @@
 #include "decoder.hpp"
 
 #include <cstdint>
+#include <iomanip>
+#include <iostream>
 #include <simulator.hpp>
 #include <variant>
 
 void Simulator::exec() {
     for (auto& instr : mInstructions) {
         exec(instr);
+    }
+
+    if (mDebug) {
+        static constexpr std::array names = {
+            "ax", "cx", "dx", "bx", "sp", "bp", "si", "di",
+        };
+        std::cout << "\nFinal registers:\n";
+        for (int i = 0; i < mRegisters.size(); ++i) {
+            std::cout << names.at(i) << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
+                      << mRegisters.at(i) << " (" << std::dec << mRegisters.at(i) << ")\n";
+        }
     }
 }
 
@@ -22,6 +35,10 @@ uint16_t Simulator::read_operand(const Operand& op) {
 
 void Simulator::write_operand(const Operand& op, uint16_t val) {
     if (const auto* r = std::get_if<Reg>(&op)) {
+        if (mDebug) {
+            std::cout << *r << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
+                      << mRegisters.at(reg_index(*r)) << " -> 0x" << std::setw(4) << val;
+        }
         mRegisters.at(reg_index(*r)) = val;
         return;
     }
@@ -29,6 +46,9 @@ void Simulator::write_operand(const Operand& op, uint16_t val) {
 }
 
 void Simulator::exec(const Instruction& instr) {
+    if (mDebug) {
+        std::cout << instr << " ; ";
+    }
     switch (instr.op()) {
     case mov: {
         write_operand(instr.dst(), read_operand(instr.src()));
@@ -59,5 +79,9 @@ void Simulator::exec(const Instruction& instr) {
     case loopnz:
     case jcxz:
         break;
+    }
+
+    if (mDebug) {
+        std::cout << "\n";
     }
 }

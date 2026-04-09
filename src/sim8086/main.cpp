@@ -1,14 +1,17 @@
+#include "decoder.hpp"
+#include "simulator.hpp"
+
 #include <iostream>
 
-#include "decoder.hpp"
-
 int main() {
-    std::cout << "sim8086: 8086 decoder\n";
-    std::vector<uint8_t> bytes = {0x70, 0xFE}; // jo 0x0
+    std::cout << "sim8086\n";
+    std::cout << "===================================\n";
+    std::vector<uint8_t> bytes = {
+        0xB8, 0x01, 0x00, 0xBB, 0x02, 0x00, 0xB9, 0x03, 0x00, 0xBA, 0x04, 0x00, 0x89, 0xC4,
+        0x89, 0xDD, 0x89, 0xCE, 0x89, 0xD7, 0x89, 0xE2, 0x89, 0xE9, 0x89, 0xF3, 0x89, 0xF8,
+    };
     auto instructions = Instruction::decode_bytes(bytes);
-
-    for (auto inst: instructions) {
-        std::cout << inst << "\n";
-    }
+    Simulator sim(std::move(instructions), true /* debug */);
+    sim.exec();
     return 0;
 }
