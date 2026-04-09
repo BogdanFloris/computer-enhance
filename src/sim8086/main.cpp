@@ -4,7 +4,7 @@
 
 int main() {
     std::cout << "sim8086: 8086 decoder\n";
-    std::vector<uint8_t> bytes = {0x89, 0xd9}; // mov cx,bx
+    std::vector<uint8_t> bytes = {0x70, 0xFE}; // jo 0x0
     auto instructions = Instruction::decode_bytes(bytes);
 
     for (auto inst: instructions) {

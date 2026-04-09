@@ -76,7 +76,9 @@ inline bool operator==(const Immediate& lhs, const Immediate& rhs) {
     return lhs.value == rhs.value && lhs.wide == rhs.wide;
 }
 
-using Operand = std::variant<Reg, Memory, Immediate>;
+using JumpOffset = int8_t;
+
+using Operand = std::variant<std::monostate, Reg, Memory, Immediate, JumpOffset>;
 
 Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w, const Operand& reg_operand,
                         const Operand& rm_operand, std::span<const uint8_t>& bytes, size_t& offset);

@@ -5,6 +5,30 @@
 
 enum Op : uint8_t {
     mov,
+    add,
+    sub,
+    cmp,
+    jnz,
+    je,
+    jl,
+    jle,
+    jb,
+    jbe,
+    jp,
+    jo,
+    js,
+    jne,
+    jnl,
+    jg,
+    jnb,
+    ja,
+    jnp,
+    jno,
+    jns,
+    loop,
+    loopz,
+    loopnz,
+    jcxz,
 };
 
 std::ostream& operator<<(std::ostream& os, const Op& op);
@@ -16,6 +40,8 @@ enum class OpSource : uint8_t {
     imm,        // immediate follows
     acc,        // fixed AL/AX based on W
     addr,       // direct address follows (2 bytes)
+    rel8,       // relative offset
+    none,       // no operand
 };
 
 struct OpcodeInfo {
@@ -84,6 +110,86 @@ constexpr std::array<OpcodeInfo, 256> make_opcode_table() {
                    .has_modrm = true,
                    .w_mask = 0x01};
     }
+
+    // Conditional jumps 0x70-0x7F
+    t[0x70] = {
+        .op = jo, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x71] = {.op = jno,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x72] = {
+        .op = jb, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x73] = {.op = jnb,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x74] = {
+        .op = je, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x75] = {.op = jnz,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x76] = {.op = jbe,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x77] = {
+        .op = ja, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x78] = {
+        .op = js, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x79] = {.op = jns,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x7A] = {
+        .op = jp, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x7B] = {.op = jnp,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x7C] = {
+        .op = jl, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+    t[0x7D] = {.op = jnl,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x7E] = {.op = jle,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0x7F] = {
+        .op = jg, .dst = OpSource::rel8, .src = OpSource::none, .has_modrm = false, .w_mask = 0x00};
+
+    // Loop instructions
+    t[0xE0] = {.op = loopnz,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0xE1] = {.op = loopz,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0xE2] = {.op = loop,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
+    t[0xE3] = {.op = jcxz,
+               .dst = OpSource::rel8,
+               .src = OpSource::none,
+               .has_modrm = false,
+               .w_mask = 0x00};
 
     return t;
 }

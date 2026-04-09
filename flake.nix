@@ -20,6 +20,7 @@
             gtest
             nasm
             ninja
+            lldb
           ];
         };
       });

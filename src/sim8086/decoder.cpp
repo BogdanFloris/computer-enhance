@@ -1,3 +1,5 @@
+#include "table.hpp"
+
 #include <cstdint>
 #include <decoder.hpp>
 #include <span>
@@ -81,12 +83,20 @@ Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,
     }
     case OpSource::acc:
         return decode_reg(0, w); // AL or AX
-    case OpSource::addr:
+    case OpSource::addr: {
         int16_t addr = static_cast<int16_t>(bytes[offset]) |           // NOLINT
                        (static_cast<int16_t>(bytes[offset + 1]) << 8); // NOLINT
         offset += 2;
         return Memory{
             .base = std::nullopt, .index = std::nullopt, .disp = addr, .disp_type = disp_hi};
+    }
+    case OpSource::rel8: {
+        auto jump_offset = static_cast<int8_t>(bytes[offset]);
+        offset += 1;
+        return jump_offset;
+    }
+    case OpSource::none:
+        return std::monostate{};
     }
 }
 
@@ -170,17 +180,29 @@ std::ostream& operator<<(std::ostream& os, const Immediate& imm) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Operand& operand) {
-    std::visit([&os](const auto& v) { os << v; }, operand);
+    std::visit(
+        [&os](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, JumpOffset>) {
+                int offset = 2 + static_cast<int>(v);
+                os << "$" << std::showpos << offset << std::noshowpos;
+            } else if constexpr (!std::is_same_v<T, std::monostate>) {
+                os << v;
+            }
+        },
+        operand);
     return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst) {
-    os << inst.op() << " " << inst.dst() << ", ";
+    os << inst.op() << " " << inst.dst();
+    if (!std::holds_alternative<std::monostate>(inst.src())) {
+        os << ", ";
+    }
 
     // Need byte/word prefix when moving immediate to memory
     const auto& src = inst.src();
-    if (std::holds_alternative<Memory>(inst.dst()) &&
-        std::holds_alternative<Immediate>(src)) {
+    if (std::holds_alternative<Memory>(inst.dst()) && std::holds_alternative<Immediate>(src)) {
         const auto& imm = std::get<Immediate>(src);
         os << (imm.wide ? "word " : "byte ");
     }
