@@ -6,6 +6,31 @@
 #include <simulator.hpp>
 #include <variant>
 
+namespace {
+uint16_t compute(Op op, uint16_t dst_val, uint16_t src_val) {
+    switch (op) {
+    case add:
+        return dst_val + src_val;
+    case sub:
+    case cmp:
+        return dst_val - src_val;
+    default:
+        throw std::runtime_error("unexpected op");
+    }
+}
+void print_flags(uint16_t f) {
+    if (f != 0) {
+        if ((f & zero_mask) != 0) {
+            std::cout << "Z";
+        }
+        if ((f & sign_mask) != 0) {
+            std::cout << "S";
+        }
+    }
+}
+
+} // namespace
+
 void Simulator::exec() {
     for (auto& instr : mInstructions) {
         exec(instr);
@@ -20,6 +45,9 @@ void Simulator::exec() {
             std::cout << names.at(i) << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
                       << mRegisters.at(i) << " (" << std::dec << mRegisters.at(i) << ")\n";
         }
+        std::cout << "flags: ";
+        print_flags(mFlags);
+        std::cout << "\n";
     }
 }
 
@@ -37,12 +65,29 @@ void Simulator::write_operand(const Operand& op, uint16_t val) {
     if (const auto* r = std::get_if<Reg>(&op)) {
         if (mDebug) {
             std::cout << *r << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
-                      << mRegisters.at(reg_index(*r)) << " -> 0x" << std::setw(4) << val;
+                      << mRegisters.at(reg_index(*r)) << " -> 0x" << std::setw(4) << val << " ";
         }
         mRegisters.at(reg_index(*r)) = val;
         return;
     }
     throw std::runtime_error("unexpected operand type");
+}
+
+void Simulator::set_flags(uint16_t result) {
+    uint16_t old_flags = mFlags;
+    mFlags = 0;
+    if (result == 0) {
+        mFlags |= zero_mask;
+    }
+    if ((result & 0x8000) != 0) {
+        mFlags |= sign_mask;
+    }
+    if (mDebug) {
+        std::cout << "flags:";
+        print_flags(old_flags);
+        std::cout << "->";
+        print_flags(mFlags);
+    }
 }
 
 void Simulator::exec(const Instruction& instr) {
@@ -56,7 +101,16 @@ void Simulator::exec(const Instruction& instr) {
     }
     case add:
     case sub:
-    case cmp:
+    case cmp: {
+        auto dst_val = read_operand(instr.dst());
+        auto src_val = read_operand(instr.src());
+        auto result = compute(instr.op(), dst_val, src_val);
+        if (instr.op() != cmp) {
+            write_operand(instr.dst(), result);
+        }
+        set_flags(result);
+        break;
+    }
     case jnz:
     case je:
     case jl:
