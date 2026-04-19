@@ -30,6 +30,7 @@ struct Simulator {
     uint16_t read_operand(const Operand& op);
     void write_operand(const Operand& op, uint16_t val);
     void set_flags(uint16_t result);
+    void jump_if(const Instruction& instr, bool condition);
     bool mDebug;
     uint16_t mFlags{};
     uint16_t mIp{};

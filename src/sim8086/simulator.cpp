@@ -106,6 +106,14 @@ void Simulator::set_flags(uint16_t result) {
     }
 }
 
+void Simulator::jump_if(const Instruction& instr, bool condition) {
+    if (condition) {
+        if (const auto* jo = std::get_if<JumpOffset>(&instr.dst())) {
+            mIp += *jo;
+        }
+    }
+}
+
 void Simulator::exec(const Instruction& instr) {
     if (mDebug) {
         std::cout << instr << " ; ";
@@ -127,31 +135,39 @@ void Simulator::exec(const Instruction& instr) {
         set_flags(result);
         break;
     }
-    case jnz: {
-        if (const auto* jo = std::get_if<JumpOffset>(&instr.dst())) {
-            if ((mFlags & zero_mask) != 0) {
-                break;
-            }
-            mIp += *jo;
-        }
-        break;
-    }
     case je:
+        jump_if(instr, (mFlags & zero_mask) != 0);
+        break;
+    case jne:
+    case jnz:
+        jump_if(instr, (mFlags & zero_mask) == 0);
+        break;
+    case js:
+        jump_if(instr, (mFlags & sign_mask) != 0);
+        break;
+    case jns:
+        jump_if(instr, (mFlags & sign_mask) == 0);
+        break;
     case jl:
+        jump_if(instr, (mFlags & sign_mask) != 0);
+        break;
+    case jnl:
+        jump_if(instr, (mFlags & sign_mask) == 0);
+        break;
     case jle:
+        jump_if(instr, (mFlags & (zero_mask | sign_mask)) != 0);
+        break;
+    case jg:
+        jump_if(instr, (mFlags & (zero_mask | sign_mask)) == 0);
+        break;
     case jb:
     case jbe:
     case jp:
     case jo:
-    case js:
-    case jne:
-    case jnl:
-    case jg:
     case jnb:
     case ja:
     case jnp:
     case jno:
-    case jns:
     case loop:
     case loopz:
     case loopnz:
