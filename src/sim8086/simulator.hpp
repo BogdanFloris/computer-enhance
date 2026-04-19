@@ -25,6 +25,7 @@ struct Simulator {
     [[nodiscard]] Registers registers() const { return mRegisters; }
     [[nodiscard]] uint16_t flags() const { return mFlags; }
     [[nodiscard]] uint16_t ip() const { return mIp; }
+    [[nodiscard]] const auto& memory() const { return mMemory; }
 
   private:
     uint16_t read_operand(const Operand& op, bool wide);
