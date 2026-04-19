@@ -19,14 +19,17 @@ uint16_t compute(Op op, uint16_t dst_val, uint16_t src_val) {
         throw std::runtime_error("unexpected op");
     }
 }
-void print_flags(uint16_t f) {
-    if (f != 0) {
-        if ((f & zero_mask) != 0) {
-            std::cout << "Z";
-        }
-        if ((f & sign_mask) != 0) {
-            std::cout << "S";
-        }
+
+std::ostream& hex16(std::ostream& os, uint16_t val) {
+    return os << "0x" << std::hex << std::setfill('0') << std::setw(4) << val << std::dec;
+}
+
+void print_flags(std::ostream& os, uint16_t f) {
+    if ((f & zero_mask) != 0) {
+        os << "Z";
+    }
+    if ((f & sign_mask) != 0) {
+        os << "S";
     }
 }
 
@@ -38,15 +41,12 @@ void Simulator::exec(std::span<const uint8_t>& bytes) {
         auto instr = Instruction::decode(subspan);
         exec(instr);
         if (mDebug) {
-            std::cout << "ip" << ": 0x" << std::hex << std::setfill('0') << std::setw(4) << mIp
-                      << " -> 0x" << std::setw(4) << mIp + instr.offset() << std::dec << " ";
+            std::cout << "ip: ";
+            hex16(std::cout, mIp) << " -> ";
+            hex16(std::cout, mIp + instr.offset()) << "\n";
         }
 
         mIp += instr.offset();
-
-        if (mDebug) {
-            std::cout << "\n";
-        }
     }
 
     if (mDebug) {
@@ -55,13 +55,13 @@ void Simulator::exec(std::span<const uint8_t>& bytes) {
         };
         std::cout << "\nFinal registers:\n";
         for (int i = 0; i < mRegisters.size(); ++i) {
-            std::cout << names.at(i) << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
-                      << mRegisters.at(i) << " (" << std::dec << mRegisters.at(i) << ")\n";
+            std::cout << names.at(i) << ": ";
+            hex16(std::cout, mRegisters.at(i)) << " (" << mRegisters.at(i) << ")\n";
         }
-        std::cout << "ip" << ": 0x" << std::hex << std::setfill('0') << std::setw(4) << mIp << " ("
-                  << std::dec << mIp << ")\n";
+        std::cout << "ip: ";
+        hex16(std::cout, mIp) << " (" << mIp << ")\n";
         std::cout << "flags: ";
-        print_flags(mFlags);
+        print_flags(std::cout, mFlags);
         std::cout << "\n";
     }
 }
@@ -79,8 +79,9 @@ uint16_t Simulator::read_operand(const Operand& op) {
 void Simulator::write_operand(const Operand& op, uint16_t val) {
     if (const auto* r = std::get_if<Reg>(&op)) {
         if (mDebug) {
-            std::cout << *r << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
-                      << mRegisters.at(reg_index(*r)) << " -> 0x" << std::setw(4) << val << " ";
+            std::cout << *r << ": ";
+            hex16(std::cout, mRegisters.at(reg_index(*r))) << " -> ";
+            hex16(std::cout, val) << " ";
         }
         mRegisters.at(reg_index(*r)) = val;
         return;
@@ -99,9 +100,9 @@ void Simulator::set_flags(uint16_t result) {
     }
     if (mDebug) {
         std::cout << "flags:";
-        print_flags(old_flags);
+        print_flags(std::cout, old_flags);
         std::cout << "->";
-        print_flags(mFlags);
+        print_flags(std::cout, mFlags);
         std::cout << " ";
     }
 }
