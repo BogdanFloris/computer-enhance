@@ -66,17 +66,38 @@ void Simulator::exec(std::span<const uint8_t>& bytes) {
     }
 }
 
-uint16_t Simulator::read_operand(const Operand& op) {
+size_t Simulator::mem_addr(const Memory& mem) {
+    size_t addr = 0;
+    if (mem.base) {
+        auto reg = mem.base.value();
+        addr += mRegisters.at(reg_index(reg));
+    }
+    if (mem.index) {
+        auto reg = mem.index.value();
+        addr += mRegisters.at(reg_index(reg));
+    }
+    addr += mem.disp;
+    return addr;
+}
+
+uint16_t Simulator::read_operand(const Operand& op, bool wide) {
     if (const auto* r = std::get_if<Reg>(&op)) {
         return mRegisters.at(reg_index(*r));
     }
     if (const auto* imm = std::get_if<Immediate>(&op)) {
         return imm->value;
     }
+    if (const auto* m = std::get_if<Memory>(&op)) {
+        auto idx = mem_addr(*m);
+        if (wide) {
+            return (mMemory.at(idx + 1) << 8) | mMemory.at(idx);
+        }
+        return mMemory.at(idx);
+    }
     throw std::runtime_error("unexpected operand type");
 }
 
-void Simulator::write_operand(const Operand& op, uint16_t val) {
+void Simulator::write_operand(const Operand& op, uint16_t val, bool wide) {
     if (const auto* r = std::get_if<Reg>(&op)) {
         if (mDebug) {
             std::cout << *r << ": ";
@@ -84,6 +105,14 @@ void Simulator::write_operand(const Operand& op, uint16_t val) {
             hex16(std::cout, val) << " ";
         }
         mRegisters.at(reg_index(*r)) = val;
+        return;
+    }
+    if (const auto* m = std::get_if<Memory>(&op)) {
+        auto idx = mem_addr(*m);
+        if (wide) {
+            mMemory.at(idx + 1) = val >> 8;
+        }
+        mMemory.at(idx) = val;
         return;
     }
     throw std::runtime_error("unexpected operand type");
@@ -121,17 +150,17 @@ void Simulator::exec(const Instruction& instr) {
     }
     switch (instr.op()) {
     case mov: {
-        write_operand(instr.dst(), read_operand(instr.src()));
+        write_operand(instr.dst(), read_operand(instr.src(), instr.wide()), instr.wide());
         break;
     }
     case add:
     case sub:
     case cmp: {
-        auto dst_val = read_operand(instr.dst());
-        auto src_val = read_operand(instr.src());
+        auto dst_val = read_operand(instr.dst(), instr.wide());
+        auto src_val = read_operand(instr.src(), instr.wide());
         auto result = compute(instr.op(), dst_val, src_val);
         if (instr.op() != cmp) {
-            write_operand(instr.dst(), result);
+            write_operand(instr.dst(), result, instr.wide());
         }
         set_flags(result);
         break;
