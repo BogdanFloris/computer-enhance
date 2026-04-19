@@ -11,11 +11,27 @@ struct DecoderTestCase {
     std::vector<std::string> expected;
 };
 
+namespace {
+std::vector<Instruction> decode_bytes(const std::vector<uint8_t>& bytes) {
+    std::vector<Instruction> instructions{};
+    instructions.reserve(bytes.size() / 2);
+    std::span<const uint8_t> remaining{bytes};
+    while (!remaining.empty()) {
+        if (remaining.size() < 2) {
+            throw std::runtime_error("truncated instruction stream");
+        }
+        instructions.push_back(Instruction::decode(remaining));
+    }
+
+    return instructions;
+}
+} // namespace
+
 class DecoderTest : public testing::TestWithParam<DecoderTestCase> {};
 
 TEST_P(DecoderTest, DecodesCorrectly) {
     const auto& [name, bytes, expected] = GetParam();
-    auto instructions = Instruction::decode_bytes(bytes);
+    auto instructions = decode_bytes(bytes);
     ASSERT_EQ(instructions.size(), expected.size()) << "instruction count mismatch";
     for (size_t i = 0; i < expected.size(); ++i) {
         std::ostringstream ss;

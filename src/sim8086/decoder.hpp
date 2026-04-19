@@ -10,7 +10,6 @@
 #include <span>
 #include <table.hpp>
 #include <variant>
-#include <vector>
 
 enum Reg : uint8_t {
     al, // 000 W=0
@@ -101,23 +100,23 @@ Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte);
 class Instruction {
   public:
     Instruction() = delete;
-    Instruction(Op op, Operand dst, Operand src, bool wide)
-        : mOp(op), mDst(dst), mSrc(src), mWide(wide) {}
+    Instruction(Op op, Operand dst, Operand src, bool wide, size_t offset)
+        : mOp{op}, mDst{dst}, mSrc{src}, mWide{wide}, mOffset{offset} {}
 
-    static std::vector<Instruction> decode_bytes(const std::vector<uint8_t>& bytes);
+    static Instruction decode(std::span<const uint8_t>& bytes);
 
     [[nodiscard]] Op op() const { return mOp; }
     [[nodiscard]] Operand dst() const { return mDst; }
     [[nodiscard]] Operand src() const { return mSrc; }
     [[nodiscard]] bool wide() const { return mWide; }
+    [[nodiscard]] size_t offset() const { return mOffset; }
 
   private:
     Op mOp;
     Operand mDst;
     Operand mSrc;
     bool mWide;
-
-    static Instruction decode(std::span<const uint8_t>& bytes);
+    size_t mOffset;
 };
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst);

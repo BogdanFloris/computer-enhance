@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <simulator.hpp>
+#include <span>
 #include <variant>
 
 namespace {
@@ -31,9 +32,12 @@ void print_flags(uint16_t f) {
 
 } // namespace
 
-void Simulator::exec() {
-    for (auto& instr : mInstructions) {
+void Simulator::exec(std::span<const uint8_t>& bytes) {
+    while (mIp < bytes.size()) {
+        auto subspan = bytes.subspan(mIp);
+        auto instr = Instruction::decode(subspan);
         exec(instr);
+        mIp += instr.offset();
     }
 
     if (mDebug) {

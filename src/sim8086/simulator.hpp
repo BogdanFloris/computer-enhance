@@ -6,7 +6,7 @@
 #include "decoder.hpp"
 
 #include <cstdint>
-#include <vector>
+#include <span>
 
 inline size_t reg_index(Reg r) {
     return r / 2;
@@ -19,11 +19,9 @@ constexpr uint16_t sign_mask = 0x80;
 
 struct Simulator {
   public:
-    Simulator() = delete;
-    Simulator(std::vector<Instruction>&& instructions, bool debug = false)
-        : mInstructions(std::move(instructions)), mRegisters{}, mDebug(debug), mFlags(0), mIp(0) {}
+    Simulator(bool debug = false) : mDebug{debug} {}
 
-    void exec();
+    void exec(std::span<const uint8_t>& bytes);
     void exec(const Instruction& instr);
     [[nodiscard]] Registers registers() const { return mRegisters; }
     [[nodiscard]] uint16_t flags() const { return mFlags; }
@@ -34,8 +32,7 @@ struct Simulator {
     void write_operand(const Operand& op, uint16_t val);
     void set_flags(uint16_t result);
     bool mDebug;
-    uint16_t mFlags;
-    uint16_t mIp;
-    std::vector<Instruction> mInstructions;
-    Registers mRegisters;
+    uint16_t mFlags{};
+    uint16_t mIp{};
+    Registers mRegisters{};
 };

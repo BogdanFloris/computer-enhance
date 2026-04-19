@@ -3,22 +3,7 @@
 #include <cstdint>
 #include <decoder.hpp>
 #include <span>
-#include <stdexcept>
 #include <variant>
-
-std::vector<Instruction> Instruction::decode_bytes(const std::vector<uint8_t>& bytes) {
-    std::vector<Instruction> instructions{};
-    instructions.reserve(bytes.size() / 2);
-    std::span<const uint8_t> remaining{bytes};
-    while (!remaining.empty()) {
-        if (remaining.size() < 2) {
-            throw std::runtime_error("truncated instruction stream");
-        }
-        instructions.push_back(Instruction::decode(remaining));
-    }
-
-    return instructions;
-}
 
 // Group 1 opcodes: REG field determines operation
 constexpr std::array<Op, 8> group1_ops = {add, add, add, add, add, sub, add, cmp};
@@ -71,7 +56,7 @@ Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     Operand src =
         resolve_operand(info.src, bytes[0], imm_w, reg_operand, rm_operand, bytes, offset);
     bytes = bytes.subspan(offset);
-    return {op, Operand{dst}, Operand{src}, w != 0U};
+    return {op, Operand{dst}, Operand{src}, w != 0U, offset};
 }
 
 Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,

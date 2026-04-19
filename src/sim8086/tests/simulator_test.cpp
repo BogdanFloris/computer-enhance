@@ -19,9 +19,10 @@ class SimulatorTest : public testing::TestWithParam<SimulatorTestCase> {};
 
 TEST_P(SimulatorTest, SimulatesCorrectly) {
     const auto& [name, bytes, expectedRegs, expectedFlags, expectedIp] = GetParam();
-    auto instructions = Instruction::decode_bytes(bytes);
-    Simulator sim(std::move(instructions));
-    sim.exec();
+    std::vector<Instruction> instructions{};
+    Simulator sim{};
+    auto bytes_span = std::span{bytes};
+    sim.exec(bytes_span);
 
     const auto actual_registers = sim.registers();
     for (size_t i = 0; i < actual_registers.size(); ++i) {
@@ -50,7 +51,7 @@ INSTANTIATE_TEST_SUITE_P(
                                           0x0008,
                                       },
                                       0,
-                                      0},
+                                      0x18},
                     SimulatorTestCase{"Listing44",
                                       {
                                           0xB8, 0x01, 0x00, 0xBB, 0x02, 0x00, 0xB9,
@@ -69,7 +70,8 @@ INSTANTIATE_TEST_SUITE_P(
                                           0x0003,
                                           0x0004,
                                       },
-                                      0},
+                                      0,
+                                      0x1C},
                     SimulatorTestCase{"Listing46",
                                       {
                                           0xBB, 0x03, 0xF0, 0xB9, 0x01, 0x0F, 0x29, 0xCB,
@@ -88,7 +90,7 @@ INSTANTIATE_TEST_SUITE_P(
 
                                       },
                                       0x40,
-                                      0},
+                                      0x18},
                     SimulatorTestCase{"Listing48",
                                       {
                                           0xB9,
@@ -116,7 +118,7 @@ INSTANTIATE_TEST_SUITE_P(
                                           0x0000,
                                           0x0000,
                                       },
-                                      0,
+                                      0x80,
                                       0x000e},
                     SimulatorTestCase{"Listing49",
                                       {
