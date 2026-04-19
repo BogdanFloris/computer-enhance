@@ -37,7 +37,16 @@ void Simulator::exec(std::span<const uint8_t>& bytes) {
         auto subspan = bytes.subspan(mIp);
         auto instr = Instruction::decode(subspan);
         exec(instr);
+        if (mDebug) {
+            std::cout << "ip" << ": 0x" << std::hex << std::setfill('0') << std::setw(4) << mIp
+                      << " -> 0x" << std::setw(4) << mIp + instr.offset() << std::dec << " ";
+        }
+
         mIp += instr.offset();
+
+        if (mDebug) {
+            std::cout << "\n";
+        }
     }
 
     if (mDebug) {
@@ -93,6 +102,7 @@ void Simulator::set_flags(uint16_t result) {
         print_flags(old_flags);
         std::cout << "->";
         print_flags(mFlags);
+        std::cout << " ";
     }
 }
 
@@ -117,7 +127,15 @@ void Simulator::exec(const Instruction& instr) {
         set_flags(result);
         break;
     }
-    case jnz:
+    case jnz: {
+        if (const auto* jo = std::get_if<JumpOffset>(&instr.dst())) {
+            if ((mFlags & zero_mask) != 0) {
+                break;
+            }
+            mIp += *jo;
+        }
+        break;
+    }
     case je:
     case jl:
     case jle:
@@ -139,9 +157,5 @@ void Simulator::exec(const Instruction& instr) {
     case loopnz:
     case jcxz:
         break;
-    }
-
-    if (mDebug) {
-        std::cout << "\n";
     }
 }

@@ -13,7 +13,6 @@ inline size_t reg_index(Reg r) {
 }
 using Registers = std::array<uint16_t, 8>;
 
-// constexpr uint16_t most = 0x8000;
 constexpr uint16_t zero_mask = 0x40;
 constexpr uint16_t sign_mask = 0x80;
 

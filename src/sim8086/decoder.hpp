@@ -106,8 +106,8 @@ class Instruction {
     static Instruction decode(std::span<const uint8_t>& bytes);
 
     [[nodiscard]] Op op() const { return mOp; }
-    [[nodiscard]] Operand dst() const { return mDst; }
-    [[nodiscard]] Operand src() const { return mSrc; }
+    [[nodiscard]] const Operand& dst() const { return mDst; }
+    [[nodiscard]] const Operand& src() const { return mSrc; }
     [[nodiscard]] bool wide() const { return mWide; }
     [[nodiscard]] size_t offset() const { return mOffset; }
 
