@@ -45,6 +45,8 @@ void Simulator::exec() {
             std::cout << names.at(i) << ": 0x" << std::hex << std::setfill('0') << std::setw(4)
                       << mRegisters.at(i) << " (" << std::dec << mRegisters.at(i) << ")\n";
         }
+        std::cout << "ip" << ": 0x" << std::hex << std::setfill('0') << std::setw(4) << mIp << " ("
+                  << std::dec << mIp << ")\n";
         std::cout << "flags: ";
         print_flags(mFlags);
         std::cout << "\n";

@@ -21,12 +21,13 @@ struct Simulator {
   public:
     Simulator() = delete;
     Simulator(std::vector<Instruction>&& instructions, bool debug = false)
-        : mInstructions(std::move(instructions)), mRegisters{}, mDebug(debug), mFlags(0) {}
+        : mInstructions(std::move(instructions)), mRegisters{}, mDebug(debug), mFlags(0), mIp(0) {}
 
     void exec();
     void exec(const Instruction& instr);
     [[nodiscard]] Registers registers() const { return mRegisters; }
     [[nodiscard]] uint16_t flags() const { return mFlags; }
+    [[nodiscard]] uint16_t ip() const { return mIp; }
 
   private:
     uint16_t read_operand(const Operand& op);
@@ -34,6 +35,7 @@ struct Simulator {
     void set_flags(uint16_t result);
     bool mDebug;
     uint16_t mFlags;
+    uint16_t mIp;
     std::vector<Instruction> mInstructions;
     Registers mRegisters;
 };

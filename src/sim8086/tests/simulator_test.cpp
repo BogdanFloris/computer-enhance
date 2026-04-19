@@ -12,12 +12,13 @@ struct SimulatorTestCase {
     std::vector<uint8_t> bytes;
     Registers expectedRegs;
     uint16_t expectedFlags;
+    uint16_t expectedIp;
 };
 
 class SimulatorTest : public testing::TestWithParam<SimulatorTestCase> {};
 
 TEST_P(SimulatorTest, SimulatesCorrectly) {
-    const auto& [name, bytes, expectedRegs, expectedFlags] = GetParam();
+    const auto& [name, bytes, expectedRegs, expectedFlags, expectedIp] = GetParam();
     auto instructions = Instruction::decode_bytes(bytes);
     Simulator sim(std::move(instructions));
     sim.exec();
@@ -27,6 +28,7 @@ TEST_P(SimulatorTest, SimulatesCorrectly) {
         EXPECT_EQ(actual_registers.at(i), expectedRegs.at(i)) << "register " << i;
     }
     EXPECT_EQ(sim.flags(), expectedFlags);
+    EXPECT_EQ(sim.ip(), expectedIp);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -47,6 +49,7 @@ INSTANTIATE_TEST_SUITE_P(
                                           0x0007,
                                           0x0008,
                                       },
+                                      0,
                                       0},
                     SimulatorTestCase{"Listing44",
                                       {
@@ -84,5 +87,64 @@ INSTANTIATE_TEST_SUITE_P(
                                           0x0000,
 
                                       },
-                                      0x40}),
+                                      0x40,
+                                      0},
+                    SimulatorTestCase{"Listing48",
+                                      {
+                                          0xB9,
+                                          0xC8,
+                                          0x00,
+                                          0x89,
+                                          0xCB,
+                                          0x81,
+                                          0xC1,
+                                          0xE8,
+                                          0x03,
+                                          0xBB,
+                                          0xD0,
+                                          0x07,
+                                          0x29,
+                                          0xD9,
+                                      },
+                                      {
+                                          0x0000,
+                                          0xfce0,
+                                          0x0000,
+                                          0x07d0,
+                                          0x0000,
+                                          0x0000,
+                                          0x0000,
+                                          0x0000,
+                                      },
+                                      0,
+                                      0x000e},
+                    SimulatorTestCase{"Listing49",
+                                      {
+                                          0xB9,
+                                          0x03,
+                                          0x00,
+                                          0xBB,
+                                          0xE8,
+                                          0x03,
+                                          0x83,
+                                          0xC3,
+                                          0x0A,
+                                          0x83,
+                                          0xE9,
+                                          0x01,
+                                          0x75,
+                                          0xF8,
+                                      },
+                                      {
+                                          0x0000,
+                                          0x0000,
+                                          0x0000,
+                                          0x0406,
+                                          0x0000,
+                                          0x0000,
+                                          0x0000,
+                                          0x0000,
+                                      },
+                                      0,
+                                      0x000e}),
     [](const auto& info) { return info.param.name; });
