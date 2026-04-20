@@ -43,16 +43,18 @@ struct EABase {
     std::optional<Reg> index;
 };
 
-constexpr std::array<EABase, 8> ea_table = {{
-    {.base = bx, .index = si},           // 000
-    {.base = bx, .index = di},           // 001
-    {.base = bp, .index = si},           // 010
-    {.base = bp, .index = di},           // 011
-    {.base = std::nullopt, .index = si}, // 100
-    {.base = std::nullopt, .index = di}, // 101
-    {.base = bp, .index = std::nullopt}, // 110 (when MOD=00: direct address)
-    {.base = bx, .index = std::nullopt}, // 111
-}};
+constexpr std::array<EABase, 8> ea_table = {
+    {
+        {.base = Reg::bx, .index = Reg::si},      // 000
+        {.base = Reg::bx, .index = Reg::di},      // 001
+        {.base = Reg::bp, .index = Reg::si},      // 010
+        {.base = Reg::bp, .index = Reg::di},      // 011
+        {.base = std::nullopt, .index = Reg::si}, // 100
+        {.base = std::nullopt, .index = Reg::di}, // 101
+        {.base = Reg::bp, .index = std::nullopt}, // 110 (when MOD=00: direct address)
+        {.base = Reg::bx, .index = std::nullopt}, // 111
+    },
+};
 
 struct Memory {
     std::optional<Reg> base;  // bx, bp, si, di, or none (direct address)

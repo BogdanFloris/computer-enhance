@@ -50,9 +50,7 @@ void Simulator::exec(std::span<const uint8_t>& bytes) {
     }
 
     if (mDebug) {
-        static constexpr std::array names = {
-            "ax", "cx", "dx", "bx", "sp", "bp", "si", "di",
-        };
+        static constexpr std::array names = {"ax", "cx", "dx", "bx", "sp", "bp", "si", "di"};
         std::cout << "\nFinal registers:\n";
         for (int i = 0; i < mRegisters.size(); ++i) {
             std::cout << names.at(i) << ": ";

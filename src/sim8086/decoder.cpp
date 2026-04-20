@@ -112,10 +112,12 @@ Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte) {
     }
 
     if (mod == 0b00 && rmByte == 0b110) {
-        return Memory{.base = std::nullopt,
-                      .index = std::nullopt,
-                      .disp = 0,
-                      .disp_type = disp_hi}; // direct address
+        return Memory{
+            .base = std::nullopt,
+            .index = std::nullopt,
+            .disp = 0,
+            .disp_type = disp_hi,
+        }; // direct address
     }
 
     constexpr std::array<DispType, 3> disp_types = {no_disp, disp_lo, disp_hi};
