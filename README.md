@@ -18,7 +18,7 @@ ninja -C build
 
 ## Test
 
-After running `ning -C build`:
+After running `ninja -C build`:
 
 ```bash
 ctest --test-dir build --output-on-failure

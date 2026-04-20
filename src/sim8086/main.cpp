@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 int main() {
     std::cout << "sim8086\n";

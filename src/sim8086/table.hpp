@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <ostream>
+#include <array>
 
 enum Op : uint8_t {
     mov,
