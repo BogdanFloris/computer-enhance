@@ -8,6 +8,129 @@
 // Group 1 opcodes: REG field determines operation
 constexpr std::array<Op, 8> group1_ops = {add, add, add, add, add, sub, add, cmp};
 
+namespace {
+enum class OperandShape : uint8_t {
+    reg_reg,
+    reg_imm,
+    reg_mem,
+    mem_reg,
+    mem_imm,
+    unsupported,
+};
+
+size_t ea_clocks(const Memory& mem) {
+    const bool has_base = mem.base.has_value();
+    const bool has_index = mem.index.has_value();
+    const bool has_disp = mem.disp != 0 || (!has_base && !has_index);
+
+    if (!has_base && !has_index) {
+        return 6;
+    }
+
+    if (has_base && has_index) {
+        const bool is_bx_si = mem.base == bx && mem.index == si;
+        const bool is_bp_di = mem.base == bp && mem.index == di;
+        return (is_bx_si || is_bp_di ? 7 : 8) + (has_disp ? 4 : 0);
+    }
+
+    return 5 + (has_disp ? 4 : 0);
+}
+
+OperandShape operand_shape(const Operand& dst, const Operand& src) {
+    if (std::holds_alternative<Reg>(dst) && std::holds_alternative<Reg>(src)) {
+        return OperandShape::reg_reg;
+    }
+    if (std::holds_alternative<Reg>(dst) && std::holds_alternative<Immediate>(src)) {
+        return OperandShape::reg_imm;
+    }
+    if (std::holds_alternative<Reg>(dst) && std::holds_alternative<Memory>(src)) {
+        return OperandShape::reg_mem;
+    }
+    if (std::holds_alternative<Memory>(dst) && std::holds_alternative<Reg>(src)) {
+        return OperandShape::mem_reg;
+    }
+    if (std::holds_alternative<Memory>(dst) && std::holds_alternative<Immediate>(src)) {
+        return OperandShape::mem_imm;
+    }
+    return OperandShape::unsupported;
+}
+
+size_t operand_ea_clocks(const Operand& dst, const Operand& src) {
+    if (const auto* mem = std::get_if<Memory>(&dst)) {
+        return ea_clocks(*mem);
+    }
+    if (const auto* mem = std::get_if<Memory>(&src)) {
+        return ea_clocks(*mem);
+    }
+    return 0;
+}
+
+size_t mov_clocks(OperandShape shape, size_t ea) {
+    switch (shape) {
+    case OperandShape::reg_reg:
+        return 2;
+    case OperandShape::reg_imm:
+        return 4;
+    case OperandShape::reg_mem:
+        return 8 + ea;
+    case OperandShape::mem_reg:
+        return 9 + ea;
+    case OperandShape::mem_imm:
+        return 10 + ea;
+    default:
+        return 0;
+    }
+}
+
+size_t alu_clocks(OperandShape shape, size_t ea, size_t mem_reg_base, size_t mem_imm_base) {
+    switch (shape) {
+    case OperandShape::reg_reg:
+        return 3;
+    case OperandShape::reg_imm:
+        return 4;
+    case OperandShape::reg_mem:
+        return 9 + ea;
+    case OperandShape::mem_reg:
+        return mem_reg_base + ea;
+    case OperandShape::mem_imm:
+        return mem_imm_base + ea;
+    default:
+        return 0;
+    }
+}
+
+size_t jump_clocks(ClockKind kind) {
+    switch (kind) {
+    case ClockKind::conditional_jump:
+        return 4;
+    case ClockKind::loop_jump:
+        return 5;
+    default:
+        return 0;
+    }
+}
+
+size_t estimate_clocks(ClockKind kind, const Operand& dst, const Operand& src) {
+    const auto shape = operand_shape(dst, src);
+    const auto ea = operand_ea_clocks(dst, src);
+
+    switch (kind) {
+    case ClockKind::mov:
+        return mov_clocks(shape, ea);
+    case ClockKind::alu:
+        return alu_clocks(shape, ea, 16, 17);
+    case ClockKind::cmp:
+        return alu_clocks(shape, ea, 9, 10);
+    case ClockKind::conditional_jump:
+    case ClockKind::loop_jump:
+        return jump_clocks(kind);
+    case ClockKind::none:
+        break;
+    }
+    return 0;
+}
+} // namespace
+
 Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     auto info = opcode_table.at(bytes[0]);
     uint8_t w = ((bytes[0] & info.w_mask) != 0) ? 1 : 0;
@@ -55,8 +178,13 @@ Instruction Instruction::decode(std::span<const uint8_t>& bytes) {
     Operand dst = resolve_operand(info.dst, bytes[0], w, reg_operand, rm_operand, bytes, offset);
     Operand src =
         resolve_operand(info.src, bytes[0], imm_w, reg_operand, rm_operand, bytes, offset);
+    auto clock_kind = info.clock_kind;
+    if (opcode == 0x80 || opcode == 0x81 || opcode == 0x83) {
+        clock_kind = (op == cmp) ? ClockKind::cmp : ClockKind::alu;
+    }
+    const auto clocks = estimate_clocks(clock_kind, dst, src);
     bytes = bytes.subspan(offset);
-    return {op, Operand{dst}, Operand{src}, w != 0U, offset};
+    return {op, Operand{dst}, Operand{src}, w != 0U, offset, clocks};
 }
 
 Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,

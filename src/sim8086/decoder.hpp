@@ -102,8 +102,8 @@ Operand decode_rm(uint8_t rmByte, uint8_t mod, uint8_t wByte);
 class Instruction {
   public:
     Instruction() = delete;
-    Instruction(Op op, Operand dst, Operand src, bool wide, size_t offset)
-        : mOp{op}, mDst{dst}, mSrc{src}, mWide{wide}, mOffset{offset} {}
+    Instruction(Op op, Operand dst, Operand src, bool wide, size_t offset, size_t clocks)
+        : mOp{op}, mDst{dst}, mSrc{src}, mWide{wide}, mOffset{offset}, mClocks{clocks} {}
 
     static Instruction decode(std::span<const uint8_t>& bytes);
 
@@ -112,6 +112,7 @@ class Instruction {
     [[nodiscard]] const Operand& src() const { return mSrc; }
     [[nodiscard]] bool wide() const { return mWide; }
     [[nodiscard]] size_t offset() const { return mOffset; }
+    [[nodiscard]] size_t clocks() const { return mClocks; }
 
   private:
     Op mOp;
@@ -119,6 +120,7 @@ class Instruction {
     Operand mSrc;
     bool mWide;
     size_t mOffset;
+    size_t mClocks;
 };
 
 std::ostream& operator<<(std::ostream& os, const Instruction& inst);

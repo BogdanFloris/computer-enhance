@@ -134,18 +134,21 @@ void Simulator::set_flags(uint16_t result) {
     }
 }
 
-void Simulator::jump_if(const Instruction& instr, bool condition) {
+bool Simulator::jump_if(const Instruction& instr, bool condition) {
     if (condition) {
         if (const auto* jo = std::get_if<JumpOffset>(&instr.dst())) {
             mIp += *jo;
+            return true;
         }
     }
+    return false;
 }
 
 void Simulator::exec(const Instruction& instr) {
     if (mDebug) {
         std::cout << instr << " ; ";
     }
+    bool jump_taken = false;
     switch (instr.op()) {
     case mov: {
         write_operand(instr.dst(), read_operand(instr.src(), instr.wide()), instr.wide());
@@ -164,29 +167,29 @@ void Simulator::exec(const Instruction& instr) {
         break;
     }
     case je:
-        jump_if(instr, (mFlags & zero_mask) != 0);
+        jump_taken = jump_if(instr, (mFlags & zero_mask) != 0);
         break;
     case jne:
     case jnz:
-        jump_if(instr, (mFlags & zero_mask) == 0);
+        jump_taken = jump_if(instr, (mFlags & zero_mask) == 0);
         break;
     case js:
-        jump_if(instr, (mFlags & sign_mask) != 0);
+        jump_taken = jump_if(instr, (mFlags & sign_mask) != 0);
         break;
     case jns:
-        jump_if(instr, (mFlags & sign_mask) == 0);
+        jump_taken = jump_if(instr, (mFlags & sign_mask) == 0);
         break;
     case jl:
-        jump_if(instr, (mFlags & sign_mask) != 0);
+        jump_taken = jump_if(instr, (mFlags & sign_mask) != 0);
         break;
     case jnl:
-        jump_if(instr, (mFlags & sign_mask) == 0);
+        jump_taken = jump_if(instr, (mFlags & sign_mask) == 0);
         break;
     case jle:
-        jump_if(instr, (mFlags & (zero_mask | sign_mask)) != 0);
+        jump_taken = jump_if(instr, (mFlags & (zero_mask | sign_mask)) != 0);
         break;
     case jg:
-        jump_if(instr, (mFlags & (zero_mask | sign_mask)) == 0);
+        jump_taken = jump_if(instr, (mFlags & (zero_mask | sign_mask)) == 0);
         break;
     case jb:
     case jbe:
@@ -201,5 +204,13 @@ void Simulator::exec(const Instruction& instr) {
     case loopnz:
     case jcxz:
         break;
+    }
+    auto clocks = instr.clocks();
+    if (jump_taken) {
+        clocks += 12;
+    }
+    mClocks += clocks;
+    if (mDebug) {
+        std::cout << "Clocks: +" << clocks << " = " << mClocks << " ";
     }
 }

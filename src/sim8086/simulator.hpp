@@ -25,17 +25,19 @@ struct Simulator {
     [[nodiscard]] Registers registers() const { return mRegisters; }
     [[nodiscard]] uint16_t flags() const { return mFlags; }
     [[nodiscard]] uint16_t ip() const { return mIp; }
+    [[nodiscard]] size_t clocks() const { return mClocks; }
     [[nodiscard]] const auto& memory() const { return mMemory; }
 
   private:
     uint16_t read_operand(const Operand& op, bool wide);
     void write_operand(const Operand& op, uint16_t val, bool wide);
     void set_flags(uint16_t result);
-    void jump_if(const Instruction& instr, bool condition);
+    bool jump_if(const Instruction& instr, bool condition);
     size_t mem_addr(const Memory& mem);
     bool mDebug;
     uint16_t mFlags{};
     uint16_t mIp{};
+    size_t mClocks{};
     Registers mRegisters{};
     std::array<uint8_t, 1024L * 1024L> mMemory{};
 };
