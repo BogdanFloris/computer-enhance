@@ -61,7 +61,8 @@ int main(int argc, char* argv[]) {
         .pair_count = *pair_count,
     };
 
-    std::string stem = "samples/haversine_" + std::string(method_name) + "_" + std::to_string(*pair_count);
+    std::string stem =
+        "samples/haversine_" + std::string(method_name) + "_" + std::to_string(*pair_count);
     std::string json_path = stem + ".json";
     std::string answers_path = stem + ".answers.f64";
 
