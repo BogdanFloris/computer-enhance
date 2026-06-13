@@ -18,40 +18,36 @@ std::optional<uint64_t> parse_u64(std::string_view text) {
     return value;
 }
 
-void print_usage(std::string_view program) {
-    std::cerr << "usage: " << program << " [uniform/cluster] [seed] [pair count]\n";
+void print_generate_usage(std::string_view program) {
+    std::cerr << "usage: " << program
+              << " [compute/generate] [uniform/cluster] [seed] [pair count]\n";
 }
 
-} // namespace
-
-int main(int argc, char* argv[]) {
-    std::span<char*> args{argv, static_cast<size_t>(argc)};
-    std::string_view program = !args.empty() ? args[0] : "haversine";
-
-    if (args.size() != 4) {
-        print_usage(program);
+int generate_input(std::span<char*> args, const std::string_view& program) {
+    if (args.size() < 3) {
+        print_generate_usage(program);
         return 1;
     }
 
-    std::string_view method_name = args[1];
+    std::string_view method_name = args[0];
     auto method = haversine::method_from_string(method_name);
     if (!method) {
         std::cerr << "error: unknown method '" << method_name << "'\n";
-        print_usage(program);
+        print_generate_usage(program);
         return 1;
     }
 
-    auto seed = parse_u64(args[2]);
+    auto seed = parse_u64(args[1]);
     if (!seed) {
-        std::cerr << "error: invalid seed '" << args[2] << "'\n";
-        print_usage(program);
+        std::cerr << "error: invalid seed '" << args[1] << "'\n";
+        print_generate_usage(program);
         return 1;
     }
 
-    auto pair_count = parse_u64(args[3]);
+    auto pair_count = parse_u64(args[2]);
     if (!pair_count) {
-        std::cerr << "error: invalid pair count '" << args[3] << "'\n";
-        print_usage(program);
+        std::cerr << "error: invalid pair count '" << args[2] << "'\n";
+        print_generate_usage(program);
         return 1;
     }
 
@@ -79,4 +75,31 @@ int main(int argc, char* argv[]) {
     }
 
     return 0;
+}
+
+int compute_distances(std::span<char*> args, const std::string_view& program) {
+    return 0;
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    std::span<char*> args{argv, static_cast<size_t>(argc)};
+    std::string_view program = !args.empty() ? args[0] : "haversine";
+
+    if (args.size() < 2) {
+        std::cerr << "error: command not found\n";
+        return 1;
+    }
+
+    std::string_view command = args[1];
+    std::span<char*> command_args = args.subspan(2);
+    if (command == "compute") {
+        return compute_distances(command_args, program);
+    }
+    if (command == "generate") {
+        return generate_input(command_args, program);
+    }
+    std::cerr << "error: invalid command '" << command << "'\n";
+    return 1;
 }
