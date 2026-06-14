@@ -1,9 +1,12 @@
 #include "generator.hpp"
+#include "parser.hpp"
 
 #include <charconv>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -19,8 +22,11 @@ std::optional<uint64_t> parse_u64(std::string_view text) {
 }
 
 void print_generate_usage(std::string_view program) {
-    std::cerr << "usage: " << program
-              << " [compute/generate] [uniform/cluster] [seed] [pair count]\n";
+    std::cerr << "usage: " << program << " generate [uniform/cluster] [seed] [pair count]\n";
+}
+
+void print_compute_usage(std::string_view program) {
+    std::cerr << "usage: " << program << " compute [input path]\n";
 }
 
 int generate_input(std::span<char*> args, const std::string_view& program) {
@@ -78,7 +84,37 @@ int generate_input(std::span<char*> args, const std::string_view& program) {
 }
 
 int compute_distances(std::span<char*> args, const std::string_view& program) {
-    return 0;
+    if (args.size() < 1) {
+        print_compute_usage(program);
+        return 1;
+    }
+
+    std::ifstream input{args[0]};
+    if (!input.is_open()) {
+        std::cerr << "error: could not open " << args[0] << "\n";
+        return 1;
+    }
+    std::stringstream buf;
+    buf << input.rdbuf();
+    std::vector<haversine::Pair> pairs;
+    input.close();
+    auto res = haversine::parse_input(buf.str(), pairs);
+    switch (res) {
+    case haversine::ParseStatus::ok: {
+        std::cout << "Read " << pairs.size() << "\n";
+        std::cout << std::setprecision(17);
+        for (auto& pair : pairs) {
+            std::cout << pair << "\n";
+        }
+        return 0;
+    }
+    case haversine::ParseStatus::no_pairs_key:
+        std::cerr << "error: no pairs key in provided input\n";
+        return 1;
+    case haversine::ParseStatus::malformed:
+        std::cerr << "error: malformed json\n";
+        return 1;
+    }
 }
 
 } // namespace

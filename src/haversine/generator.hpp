@@ -24,13 +24,6 @@ enum class Method : uint8_t {
 
 std::optional<Method> method_from_string(std::string_view name);
 
-struct Pair {
-    f64 x0; // longitude  [-180, 180]
-    f64 y0; // latitude   [-90, 90]
-    f64 x1;
-    f64 y1;
-};
-
 struct GenerateParams {
     Method method;
     uint64_t seed;

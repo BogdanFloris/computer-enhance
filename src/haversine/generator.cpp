@@ -1,5 +1,7 @@
 #include "generator.hpp"
 
+#include "haversine.hpp"
+
 #include <algorithm>
 #include <array>
 #include <bit>
