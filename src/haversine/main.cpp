@@ -1,7 +1,11 @@
 #include "generator.hpp"
 #include "parser.hpp"
+#include "reference_haversine.hpp"
 
+#include <array>
+#include <bit>
 #include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -9,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -26,7 +31,26 @@ void print_generate_usage(std::string_view program) {
 }
 
 void print_compute_usage(std::string_view program) {
-    std::cerr << "usage: " << program << " compute [input path]\n";
+    std::cerr << "usage: " << program << " compute [input path] [answers_path?]\n";
+}
+
+// Read a binary answers file (a sequence of little-endian f64 values: one
+// reference distance per pair, followed by the expected sum).
+std::optional<std::vector<haversine::f64>> read_answers(const std::string& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in.is_open()) {
+        return std::nullopt;
+    }
+    std::vector<haversine::f64> values;
+    std::array<char, sizeof(haversine::f64)> bytes{};
+    while (in.read(bytes.data(), bytes.size())) {
+        values.push_back(std::bit_cast<haversine::f64>(bytes));
+    }
+    // A trailing partial value means the file is truncated/corrupt.
+    if (in.gcount() != 0) {
+        return std::nullopt;
+    }
+    return values;
 }
 
 int generate_input(std::span<char*> args, const std::string_view& program) {
@@ -101,10 +125,41 @@ int compute_distances(std::span<char*> args, const std::string_view& program) {
     auto res = haversine::parse_input(buf.str(), pairs);
     switch (res) {
     case haversine::ParseStatus::ok: {
-        std::cout << "Read " << pairs.size() << "\n";
+        std::optional<std::vector<haversine::f64>> answers;
+        if (args.size() >= 2) {
+            answers = read_answers(args[1]);
+            if (!answers) {
+                std::cerr << "error: could not read answers file " << args[1] << "\n";
+                return 1;
+            }
+        }
+
+        haversine::f64 sum = 0.0;
+        haversine::f64 sum_coeff = 1.0 / static_cast<haversine::f64>(pairs.size());
+        uint64_t mismatches = 0;
+        for (size_t i = 0; i < pairs.size(); ++i) {
+            const auto& pair = pairs[i];
+            auto distance = haversine::reference_haversine(pair.x0, pair.y0, pair.x1, pair.y1);
+            sum += sum_coeff * distance;
+            if (answers && distance != (*answers)[i]) {
+                ++mismatches;
+            }
+        }
+
         std::cout << std::setprecision(17);
-        for (auto& pair : pairs) {
-            std::cout << pair << "\n";
+        std::cout << "Pair count: " << pairs.size() << "\n";
+        std::cout << "Sum: " << sum << "\n";
+
+        if (answers) {
+            haversine::f64 reference_sum = answers->back();
+            std::cout << "Reference sum: " << reference_sum << "\n";
+            std::cout << "Difference: " << (sum - reference_sum) << "\n";
+            if (mismatches != 0) {
+                std::cout << "Distance mismatches: " << mismatches << " / " << pairs.size() << "\n";
+            }
+            bool ok = (mismatches == 0) && (sum == reference_sum);
+            std::cout << "Validation: " << (ok ? "PASS" : "FAIL") << "\n";
+            return ok ? 0 : 1;
         }
         return 0;
     }
