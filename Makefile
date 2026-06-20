@@ -4,13 +4,16 @@ BUILD_TYPE ?= Debug
 
 ifeq ($(ARCH),x86)
   CMAKE_EXTRA := -DCMAKE_OSX_ARCHITECTURES=x86_64
-  BUILD_DIR   := build-x86
+  ARCH_PREFIX := x86-
 else
   CMAKE_EXTRA :=
-  BUILD_DIR   := build
+  ARCH_PREFIX :=
 endif
 
-.PHONY: configure build clean sim8086 haversine test
+TYPE_LOWER := $(shell echo $(BUILD_TYPE) | tr A-Z a-z)
+BUILD_DIR  := build/$(ARCH_PREFIX)$(TYPE_LOWER)
+
+.PHONY: configure build release clean sim8086 haversine test
 
 configure:
 	cmake -S . -B $(BUILD_DIR) -G Ninja \
@@ -19,6 +22,11 @@ configure:
 
 build: configure
 	cmake --build $(BUILD_DIR)
+
+# Use this for disassembly/profiling: make release, then
+#   lldb build/relwithdebinfo/src/haversine/haversine
+release:
+	$(MAKE) build BUILD_TYPE=RelWithDebInfo
 
 sim8086: build
 	./$(BUILD_DIR)/src/sim8086/sim8086 $(ARGS)
