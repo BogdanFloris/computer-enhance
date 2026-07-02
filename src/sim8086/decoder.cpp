@@ -228,6 +228,7 @@ Operand resolve_operand(OpSource source, uint8_t opcode, uint8_t w,
     case OpSource::none:
         return std::monostate{};
     }
+    __builtin_unreachable();
 }
 
 Operand decode_reg(uint8_t regByte, uint8_t wByte) {

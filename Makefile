@@ -18,6 +18,7 @@ BUILD_DIR  := build/$(ARCH_PREFIX)$(TYPE_LOWER)
 configure:
 	cmake -S . -B $(BUILD_DIR) -G Ninja \
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 		$(CMAKE_EXTRA)
 
 build: configure
