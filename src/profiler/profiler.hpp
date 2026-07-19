@@ -74,13 +74,13 @@ class ProfileRegistry {
     }
 
     void print_report(std::string_view total_label) const {
-        const auto total_it = mStats.find(std::string{total_label});
+        const auto total_it = mStats.find(std::string(total_label));
         if (total_it == mStats.end() || total_it->second.total_cycles == 0) {
             return;
         }
 
         const auto total_cycles = static_cast<double>(total_it->second.total_cycles);
-        std::cout << "Profile (inclusive cycles; total: " << total_label << ")\n";
+        std::cout << "Profile (total: " << total_label << ")\n";
         for (const auto& [label, stats] : mStats) {
             const double percent = 100.0 * static_cast<double>(stats.total_cycles) / total_cycles;
             std::cout << "  " << label << ": " << stats.total_cycles << " (" << std::fixed
