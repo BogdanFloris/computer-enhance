@@ -1,5 +1,6 @@
 #include "processor.hpp"
 
+#include "profiler.hpp"
 #include "reference_haversine.hpp"
 
 #include <array>
@@ -23,6 +24,7 @@ std::optional<std::vector<f64>> read_answers(const std::string& path) {
 }
 
 ComputeResult evaluate_pairs(const std::vector<Pair>& pairs, const std::vector<f64>* answers) {
+    BEGIN_PROF();
     ComputeResult result;
     f64 coeff = 1.0 / static_cast<f64>(pairs.size());
     for (size_t i = 0; i < pairs.size(); ++i) {
@@ -37,6 +39,7 @@ ComputeResult evaluate_pairs(const std::vector<Pair>& pairs, const std::vector<f
 }
 
 ValidationResult validate(const std::vector<Pair>& pairs, const std::vector<f64>& answers) {
+    BEGIN_PROF();
     ValidationResult result;
     result.expected_values = pairs.size() + 1;
     result.actual_values = answers.size();

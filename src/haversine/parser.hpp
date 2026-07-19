@@ -1,7 +1,9 @@
 #pragma once
 
 #include "haversine.hpp"
+#include "profiler.hpp"
 
+#include <cstdint>
 #include <vector>
 
 namespace haversine {
@@ -33,6 +35,7 @@ bool extract_value(const std::string& object_str, const std::string& key, double
 enum class ParseStatus : uint8_t { ok, no_pairs_key, malformed };
 
 inline ParseStatus parse_input(const std::string& input, std::vector<Pair>& pairs) {
+    BEGIN_PROF();
     size_t array_pos = input.find("\"pairs\"");
     if (array_pos == std::string::npos) {
         return ParseStatus::no_pairs_key;

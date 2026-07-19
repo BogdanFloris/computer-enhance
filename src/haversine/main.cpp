@@ -135,6 +135,7 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
         return 1;
     }
 
+    BEGIN_PROF_NAMED(read_file, "read_file");
     std::ifstream input{args[0]};
     if (!input.is_open()) {
         std::cerr << "error: could not open " << args[0] << "\n";
@@ -142,10 +143,12 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
     }
     std::stringstream buf;
     buf << input.rdbuf();
+    END_PROF(read_file);
 
     std::vector<haversine::Pair> pairs;
-    if (const char* err = parse_error_message(haversine::parse_input(buf.str(), pairs))) {
-        std::cerr << "error: " << err << "\n";
+    const char* parse_error = parse_error_message(haversine::parse_input(buf.str(), pairs));
+    if (parse_error != nullptr) {
+        std::cerr << "error: " << parse_error << "\n";
         return 1;
     }
 
@@ -180,7 +183,9 @@ int main(int argc, char* argv[]) {
     std::string_view command = args[1];
     std::span<char*> command_args = args.subspan(2);
     if (command == "compute") {
-        return cmd_compute(command_args, program);
+        const int result = cmd_compute(command_args, program);
+        profiler::print_profile_report("cmd_compute");
+        return result;
     }
     if (command == "generate") {
         return cmd_generate(command_args, program);
