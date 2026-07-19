@@ -129,19 +129,12 @@ int cmd_generate(std::span<char*> args, std::string_view program) {
 }
 
 int cmd_compute(std::span<char*> args, std::string_view program) {
-    uint64_t prof_begin = 0;
-    uint64_t prof_end = 0;
-    uint64_t prof_read = 0;
-    uint64_t prof_parse = 0;
-    uint64_t prof_read_answers = 0;
-    uint64_t prof_evaluate = 0;
-    prof_begin = profiler::read_cpu_timer();
+    BEGIN_PROF();
     if (args.empty()) {
         print_compute_usage(program);
         return 1;
     }
 
-    prof_read = profiler::read_cpu_timer();
     std::ifstream input{args[0]};
     if (!input.is_open()) {
         std::cerr << "error: could not open " << args[0] << "\n";
@@ -150,14 +143,12 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
     std::stringstream buf;
     buf << input.rdbuf();
 
-    prof_parse = profiler::read_cpu_timer();
     std::vector<haversine::Pair> pairs;
     if (const char* err = parse_error_message(haversine::parse_input(buf.str(), pairs))) {
         std::cerr << "error: " << err << "\n";
         return 1;
     }
 
-    prof_read_answers = profiler::read_cpu_timer();
     if (args.size() < 2) {
         std::cout << std::setprecision(17);
         std::cout << "Pair count: " << pairs.size() << "\n";
@@ -171,22 +162,7 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
         return 1;
     }
 
-    prof_evaluate = profiler::read_cpu_timer();
     auto rv = print_validation(pairs.size(), haversine::validate(pairs, *answers));
-
-    prof_end = profiler::read_cpu_timer();
-    auto cpu_elapsed = prof_end - prof_begin;
-    auto cpu_freq = profiler::estimate_cpu_timer_freq();
-    if (cpu_freq != 0) {
-        std::cout << std::setprecision(4)
-                  << "\nTotal time: " << 1000.0 * (double)cpu_elapsed / (double)cpu_freq
-                  << "ms (CPU freq " << cpu_freq << ")\n";
-    }
-    print_time_elapsed("Startup", cpu_elapsed, prof_begin, prof_read);
-    print_time_elapsed("Read", cpu_elapsed, prof_read, prof_parse);
-    print_time_elapsed("Parse", cpu_elapsed, prof_parse, prof_read_answers);
-    print_time_elapsed("ReadAnswers", cpu_elapsed, prof_read_answers, prof_evaluate);
-    print_time_elapsed("Evaluate", cpu_elapsed, prof_evaluate, prof_end);
     return rv;
 }
 

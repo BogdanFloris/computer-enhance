@@ -1,7 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <iomanip>
+#include <iostream>
+#include <string>
 #include <sys/time.h>
+#include <utility>
 
 namespace profiler {
 
@@ -46,5 +50,30 @@ inline uint64_t estimate_cpu_timer_freq() {
     }
     return cpu_freq;
 }
+
+#define PROF_CONCAT_IMPL(x, y) x##y
+#define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
+#define BEGIN_PROF_TAG(tag) profiler::Profiler PROF_CONCAT(profiler_, __LINE__)(tag)
+#define BEGIN_PROF() BEGIN_PROF_TAG(__func__)
+
+class Profiler {
+  public:
+    Profiler(const Profiler&) = default;
+    Profiler(Profiler&&) = delete;
+    Profiler& operator=(const Profiler&) = delete;
+    Profiler& operator=(Profiler&&) = delete;
+    Profiler(std::string label) : mLabel(std::move(label)), mBegin(read_cpu_timer()) {}
+    ~Profiler() {
+        uint64_t end = read_cpu_timer();
+        uint64_t elapsed = end - mBegin;
+        float percent = 0;
+        std::cout << "  " << mLabel << ": " << elapsed << " (" << std::fixed << std::setprecision(2)
+                  << percent << "%)\n";
+    }
+
+  private:
+    std::string mLabel;
+    uint64_t mBegin;
+};
 
 } // namespace profiler
