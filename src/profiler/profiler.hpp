@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
@@ -17,6 +19,7 @@
 namespace profiler {
 
 constexpr uint64_t os_timer_freq = 1000000;
+constexpr size_t max_profile_depth = 64;
 
 inline uint64_t read_os_timer() {
     timeval val{};
@@ -75,6 +78,8 @@ struct ProfileStats {
     std::atomic<uint64_t> total_cycles = 0;
     std::atomic<uint64_t> child_cycles = 0;
     std::atomic<uint64_t> call_count = 0;
+    std::atomic<uint64_t> recursive_scopes_elided = 0;
+    std::atomic<uint64_t> depth_scopes_elided = 0;
 };
 
 struct ProfileNode {
@@ -107,6 +112,12 @@ class ProfileRegistry {
         if (parent != nullptr) {
             parent->stats.child_cycles.fetch_add(elapsed_cycles, std::memory_order_relaxed);
         }
+    }
+
+    static void record_elided(ProfileNode* node, bool recursive) {
+        auto& count =
+            recursive ? node->stats.recursive_scopes_elided : node->stats.depth_scopes_elided;
+        count.fetch_add(1, std::memory_order_relaxed);
     }
 
     void print_report() const { print_report(estimate_cpu_timer_freq()); }
@@ -146,6 +157,10 @@ class ProfileRegistry {
             const uint64_t self_cycles =
                 total_cycles >= child_cycles ? total_cycles - child_cycles : 0;
             const uint64_t call_count = node.stats.call_count.load(std::memory_order_relaxed);
+            const uint64_t recursive_scopes_elided =
+                node.stats.recursive_scopes_elided.load(std::memory_order_relaxed);
+            const uint64_t depth_scopes_elided =
+                node.stats.depth_scopes_elided.load(std::memory_order_relaxed);
             const double percent =
                 100.0 * static_cast<double>(total_cycles) / static_cast<double>(report_total);
             const double total_milliseconds = (double)total_cycles * milliseconds_per_cycle;
@@ -153,8 +168,20 @@ class ProfileRegistry {
 
             std::cout << std::string(static_cast<size_t>(current.second) * 2, ' ') << node.label
                       << ": " << std::fixed << std::setprecision(3) << total_milliseconds << " ms ("
-                      << std::setprecision(2) << percent << "% total, " << std::setprecision(3)
-                      << self_milliseconds << " ms self, " << call_count << " calls)\n";
+                      << std::setprecision(2) << percent << "% total, ";
+            if (recursive_scopes_elided != 0 || depth_scopes_elided != 0) {
+                std::cout << "self unavailable, " << call_count << " calls";
+                if (recursive_scopes_elided != 0) {
+                    std::cout << ", " << recursive_scopes_elided << " recursive scopes elided";
+                }
+                if (depth_scopes_elided != 0) {
+                    std::cout << ", " << depth_scopes_elided << " depth-limit scopes elided";
+                }
+                std::cout << ")\n";
+            } else {
+                std::cout << std::setprecision(3) << self_milliseconds << " ms self, " << call_count
+                          << " calls)\n";
+            }
 
             for (const auto& it : std::ranges::reverse_view(node.children)) {
                 pending.emplace_back(&it.second, current.second + 1);
@@ -193,8 +220,12 @@ class Profiler {
                "profilers must end in reverse construction order");
         uint64_t end = read_cpu_timer();
         uint64_t elapsed = end - mBegin;
-        profiler::ProfileRegistry::record(mNode, mParent != nullptr ? mParent->mNode : nullptr,
-                                          elapsed);
+        if (mElisionNode != nullptr) {
+            profiler::ProfileRegistry::record_elided(mElisionNode, mElidedByRecursion);
+        } else {
+            profiler::ProfileRegistry::record(mNode, mParent != nullptr ? mParent->mNode : nullptr,
+                                              elapsed);
+        }
         active_profilers.pop_back();
         mEnded = true;
     }
@@ -202,6 +233,28 @@ class Profiler {
   private:
     void begin(std::string_view label, ProfileNodeCache* cache) {
         mParent = active_profilers.empty() ? nullptr : active_profilers.back();
+        if (mParent != nullptr && mParent->mElisionNode != nullptr) {
+            mNode = mParent->mNode;
+            mElisionNode = mParent->mElisionNode;
+            mElidedByRecursion = mParent->mElidedByRecursion;
+        } else if (active_profilers.size() >= max_profile_depth) {
+            mNode = mParent != nullptr ? mParent->mNode : nullptr;
+            mElisionNode = mNode;
+        } else if (ProfileNode* boundary = recursive_boundary(label); boundary != nullptr) {
+            mNode = mParent != nullptr ? mParent->mNode : nullptr;
+            mElisionNode = boundary;
+            mElidedByRecursion = true;
+        } else if (has_active_label(label)) {
+            initialize_node(label, cache);
+            mRecursionBoundary = true;
+        } else {
+            initialize_node(label, cache);
+        }
+        mBegin = read_cpu_timer();
+        active_profilers.push_back(this);
+    }
+
+    void initialize_node(std::string_view label, ProfileNodeCache* cache) {
         ProfileNode* parent_node = mParent != nullptr ? mParent->mNode : nullptr;
         if (cache != nullptr && cache->parent == parent_node && cache->node != nullptr) {
             mNode = cache->node;
@@ -212,14 +265,30 @@ class Profiler {
                 cache->node = mNode;
             }
         }
-        mBegin = read_cpu_timer();
-        active_profilers.push_back(this);
+    }
+
+    static bool has_active_label(std::string_view label) {
+        return std::ranges::any_of(active_profilers, [label](const Profiler* profiler) {
+            return profiler->mElisionNode == nullptr && profiler->mNode->label == label;
+        });
+    }
+
+    static ProfileNode* recursive_boundary(std::string_view label) {
+        for (const Profiler* profiler : active_profilers) {
+            if (profiler->mRecursionBoundary && profiler->mNode->label == label) {
+                return profiler->mNode;
+            }
+        }
+        return nullptr;
     }
 
     Profiler* mParent = nullptr;
     ProfileNode* mNode = nullptr;
+    ProfileNode* mElisionNode = nullptr;
     uint64_t mBegin = 0;
     bool mEnded = false;
+    bool mElidedByRecursion = false;
+    bool mRecursionBoundary = false;
     inline static thread_local std::vector<Profiler*> active_profilers = [] {
         std::vector<Profiler*> profilers;
         profilers.reserve(16);
