@@ -1,24 +1,20 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
-#include <map>
-#include <mutex>
-#include <ranges>
-#include <string>
-#include <string_view>
 #include <sys/time.h>
-#include <utility>
 #include <vector>
 
 namespace profiler {
 
 constexpr uint64_t os_timer_freq = 1000000;
-constexpr size_t max_profile_depth = 64;
+constexpr size_t max_profile_zones = 4096;
+constexpr size_t max_profile_threads = 64;
 
 inline uint64_t read_os_timer() {
     timeval val{};
@@ -53,246 +49,160 @@ inline uint64_t estimate_cpu_timer_freq() {
 
     uint64_t cpu_end = read_cpu_timer();
     uint64_t cpu_elapsed = cpu_end - cpu_start;
-    uint64_t cpu_freq = 0;
-    if (os_elapsed != 0) {
-        cpu_freq = os_timer_freq * cpu_elapsed / os_elapsed;
-    }
-    return cpu_freq;
+    return (os_elapsed != 0) ? (os_timer_freq * cpu_elapsed / os_elapsed) : 0;
 }
 
-#define PROF_CONCAT_IMPL(x, y) x##y
-#define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
-#define BEGIN_PROF_TAG(tag) BEGIN_PROF_TAG_IMPL(tag, __LINE__)
-#define BEGIN_PROF_TAG_IMPL(tag, line)                                                             \
-    static thread_local profiler::ProfileNodeCache PROF_CONCAT(profile_node_cache_, line);         \
-    profiler::Profiler PROF_CONCAT(profiler_, line)(tag, PROF_CONCAT(profile_node_cache_, line))
-#define BEGIN_PROF() BEGIN_PROF_TAG(__func__)
-#define BEGIN_PROF_NAMED(identifier, tag)                                                          \
-    static thread_local profiler::ProfileNodeCache PROF_CONCAT(profile_node_cache_, identifier);   \
-    profiler::Profiler PROF_CONCAT(profiler_,                                                      \
-                                   identifier)(tag, PROF_CONCAT(profile_node_cache_, identifier))
-#define END_PROF(identifier) PROF_CONCAT(profiler_, identifier).end()
-
-struct ProfileStats {
-    std::atomic<uint64_t> total_cycles = 0;
-    std::atomic<uint64_t> child_cycles = 0;
-    std::atomic<uint64_t> call_count = 0;
-    std::atomic<uint64_t> recursive_scopes_elided = 0;
-    std::atomic<uint64_t> depth_scopes_elided = 0;
+struct ProfileAnchor {
+    uint64_t total_tsc = 0; // Inclusive time
+    int64_t self_tsc = 0;   // Exclusive time
+    uint64_t hit_count = 0;
+    uint32_t active_count = 0; // Used to prevent overcounting total time during recursion
 };
 
-struct ProfileNode {
-    std::string_view label;
-    ProfileStats stats;
-    std::map<std::string, ProfileNode, std::less<>> children;
+struct ThreadProfileData {
+    std::array<ProfileAnchor, max_profile_zones> anchors{};
+    uint32_t parent_index = 0;
 };
 
-struct ProfileNodeCache {
-    ProfileNode* parent = nullptr;
-    ProfileNode* node = nullptr;
-};
+inline std::array<const char*, max_profile_zones> g_zone_labels = {"Root"};
+inline std::atomic<uint32_t> g_zone_count{1};
+inline std::array<ThreadProfileData, max_profile_threads> g_thread_data;
+inline std::atomic<uint32_t> g_thread_count{0};
 
-class ProfileRegistry {
+inline uint32_t allocate_zone(const char* label) {
+    uint32_t index = g_zone_count.fetch_add(1, std::memory_order_relaxed);
+    assert(index < max_profile_zones && "Exceeded MAX_PROFILE_ZONES!");
+    g_zone_labels.at(index) = label;
+    return index;
+}
+
+inline ThreadProfileData* get_thread_data() {
+    static thread_local ThreadProfileData* td = []() {
+        uint32_t index = g_thread_count.fetch_add(1, std::memory_order_relaxed);
+        assert(index < max_profile_threads && "Exceeded MAX_PROFILE_THREADS!");
+        return &g_thread_data.at(index);
+    }();
+    return td;
+}
+
+class ScopedProfile {
   public:
-    ProfileNode* enter(ProfileNode* parent, std::string_view label) {
-        std::lock_guard lock(mMutex);
-        auto& nodes = parent != nullptr ? parent->children : mRoots;
-        auto it = nodes.find(label);
-        if (it == nodes.end()) {
-            it = nodes.try_emplace(std::string(label)).first;
-            it->second.label = it->first;
-        }
-        return &it->second;
+    ScopedProfile(ScopedProfile&&) = delete;
+    ScopedProfile& operator=(ScopedProfile&&) = delete;
+    ScopedProfile(const ScopedProfile&) = delete;
+    ScopedProfile& operator=(const ScopedProfile&) = delete;
+
+    explicit ScopedProfile(uint32_t zone_index)
+        : m_thread_data(get_thread_data()), m_zone_index(zone_index),
+          m_parent_index(m_thread_data->parent_index), m_start_tsc(read_cpu_timer()) {
+        m_thread_data->parent_index = zone_index;
+        m_thread_data->anchors.at(m_zone_index).active_count++;
     }
 
-    static void record(ProfileNode* node, ProfileNode* parent, uint64_t elapsed_cycles) {
-        node->stats.total_cycles.fetch_add(elapsed_cycles, std::memory_order_relaxed);
-        node->stats.call_count.fetch_add(1, std::memory_order_relaxed);
-        if (parent != nullptr) {
-            parent->stats.child_cycles.fetch_add(elapsed_cycles, std::memory_order_relaxed);
-        }
-    }
-
-    static void record_elided(ProfileNode* node, bool recursive) {
-        auto& count =
-            recursive ? node->stats.recursive_scopes_elided : node->stats.depth_scopes_elided;
-        count.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    void print_report() const { print_report(estimate_cpu_timer_freq()); }
-
-    void print_report(uint64_t cpu_timer_freq) const {
-        if (cpu_timer_freq == 0) {
-            return;
-        }
-
-        std::lock_guard lock(mMutex);
-        bool printed_header = false;
-        for (const auto& [label, root] : mRoots) {
-            const uint64_t total_cycles = root.stats.total_cycles.load(std::memory_order_relaxed);
-            if (total_cycles == 0) {
-                continue;
-            }
-
-            if (!printed_header) {
-                std::cout << "Profile\n";
-                printed_header = true;
-            }
-            print_node(root, total_cycles, 1, 1000.0 / static_cast<double>(cpu_timer_freq));
-        }
-    }
-
-  private:
-    static void print_node(const ProfileNode& root, uint64_t report_total, int root_depth,
-                           double milliseconds_per_cycle) {
-        std::vector<std::pair<const ProfileNode*, int>> pending{{&root, root_depth}};
-        while (!pending.empty()) {
-            const auto current = pending.back();
-            pending.pop_back();
-
-            const ProfileNode& node = *current.first;
-            const uint64_t total_cycles = node.stats.total_cycles.load(std::memory_order_relaxed);
-            const uint64_t child_cycles = node.stats.child_cycles.load(std::memory_order_relaxed);
-            const uint64_t self_cycles =
-                total_cycles >= child_cycles ? total_cycles - child_cycles : 0;
-            const uint64_t call_count = node.stats.call_count.load(std::memory_order_relaxed);
-            const uint64_t recursive_scopes_elided =
-                node.stats.recursive_scopes_elided.load(std::memory_order_relaxed);
-            const uint64_t depth_scopes_elided =
-                node.stats.depth_scopes_elided.load(std::memory_order_relaxed);
-            const double percent =
-                100.0 * static_cast<double>(total_cycles) / static_cast<double>(report_total);
-            const double total_milliseconds = (double)total_cycles * milliseconds_per_cycle;
-            const double self_milliseconds = (double)self_cycles * milliseconds_per_cycle;
-
-            std::cout << std::string(static_cast<size_t>(current.second) * 2, ' ') << node.label
-                      << ": " << std::fixed << std::setprecision(3) << total_milliseconds << " ms ("
-                      << std::setprecision(2) << percent << "% total, ";
-            if (recursive_scopes_elided != 0 || depth_scopes_elided != 0) {
-                std::cout << "self unavailable, " << call_count << " calls";
-                if (recursive_scopes_elided != 0) {
-                    std::cout << ", " << recursive_scopes_elided << " recursive scopes elided";
-                }
-                if (depth_scopes_elided != 0) {
-                    std::cout << ", " << depth_scopes_elided << " depth-limit scopes elided";
-                }
-                std::cout << ")\n";
-            } else {
-                std::cout << std::setprecision(3) << self_milliseconds << " ms self, " << call_count
-                          << " calls)\n";
-            }
-
-            for (const auto& it : std::ranges::reverse_view(node.children)) {
-                pending.emplace_back(&it.second, current.second + 1);
-            }
-        }
-    }
-
-    mutable std::mutex mMutex;
-    std::map<std::string, ProfileNode, std::less<>> mRoots;
-};
-
-inline ProfileRegistry& profile_registry() {
-    static ProfileRegistry registry;
-    return registry;
-}
-
-inline void print_profile_report() {
-    profile_registry().print_report();
-}
-
-class Profiler {
-  public:
-    Profiler(const Profiler&) = delete;
-    Profiler(Profiler&&) = delete;
-    Profiler& operator=(const Profiler&) = delete;
-    Profiler& operator=(Profiler&&) = delete;
-    explicit Profiler(std::string_view label) { begin(label, nullptr); }
-    Profiler(std::string_view label, ProfileNodeCache& cache) { begin(label, &cache); }
-    ~Profiler() { end(); }
+    ~ScopedProfile() { end(); }
 
     void end() {
-        if (mEnded) {
+        if (m_ended) {
             return;
         }
-        assert(!active_profilers.empty() && active_profilers.back() == this &&
-               "profilers must end in reverse construction order");
-        uint64_t end = read_cpu_timer();
-        uint64_t elapsed = end - mBegin;
-        if (mElisionNode != nullptr) {
-            profiler::ProfileRegistry::record_elided(mElisionNode, mElidedByRecursion);
-        } else {
-            profiler::ProfileRegistry::record(mNode, mParent != nullptr ? mParent->mNode : nullptr,
-                                              elapsed);
+        uint64_t elapsed = read_cpu_timer() - m_start_tsc;
+
+        ProfileAnchor& zone = m_thread_data->anchors.at(m_zone_index);
+        zone.self_tsc += (int64_t)elapsed;
+        zone.hit_count++;
+        zone.active_count--;
+
+        // Only add to total if we are the outermost call of this specific zone (handles recursion)
+        if (zone.active_count == 0) {
+            zone.total_tsc += elapsed;
         }
-        active_profilers.pop_back();
-        mEnded = true;
+
+        if (m_parent_index != 0) {
+            m_thread_data->anchors.at(m_parent_index).self_tsc -= (int64_t)elapsed;
+        }
+
+        m_thread_data->parent_index = m_parent_index;
+        m_ended = true;
     }
 
   private:
-    void begin(std::string_view label, ProfileNodeCache* cache) {
-        mParent = active_profilers.empty() ? nullptr : active_profilers.back();
-        if (mParent != nullptr && mParent->mElisionNode != nullptr) {
-            mNode = mParent->mNode;
-            mElisionNode = mParent->mElisionNode;
-            mElidedByRecursion = mParent->mElidedByRecursion;
-        } else if (active_profilers.size() >= max_profile_depth) {
-            mNode = mParent != nullptr ? mParent->mNode : nullptr;
-            mElisionNode = mNode;
-        } else if (ProfileNode* boundary = recursive_boundary(label); boundary != nullptr) {
-            mNode = mParent != nullptr ? mParent->mNode : nullptr;
-            mElisionNode = boundary;
-            mElidedByRecursion = true;
-        } else if (has_active_label(label)) {
-            initialize_node(label, cache);
-            mRecursionBoundary = true;
-        } else {
-            initialize_node(label, cache);
-        }
-        mBegin = read_cpu_timer();
-        active_profilers.push_back(this);
-    }
-
-    void initialize_node(std::string_view label, ProfileNodeCache* cache) {
-        ProfileNode* parent_node = mParent != nullptr ? mParent->mNode : nullptr;
-        if (cache != nullptr && cache->parent == parent_node && cache->node != nullptr) {
-            mNode = cache->node;
-        } else {
-            mNode = profile_registry().enter(parent_node, label);
-            if (cache != nullptr) {
-                cache->parent = parent_node;
-                cache->node = mNode;
-            }
-        }
-    }
-
-    static bool has_active_label(std::string_view label) {
-        return std::ranges::any_of(active_profilers, [label](const Profiler* profiler) {
-            return profiler->mElisionNode == nullptr && profiler->mNode->label == label;
-        });
-    }
-
-    static ProfileNode* recursive_boundary(std::string_view label) {
-        for (const Profiler* profiler : active_profilers) {
-            if (profiler->mRecursionBoundary && profiler->mNode->label == label) {
-                return profiler->mNode;
-            }
-        }
-        return nullptr;
-    }
-
-    Profiler* mParent = nullptr;
-    ProfileNode* mNode = nullptr;
-    ProfileNode* mElisionNode = nullptr;
-    uint64_t mBegin = 0;
-    bool mEnded = false;
-    bool mElidedByRecursion = false;
-    bool mRecursionBoundary = false;
-    inline static thread_local std::vector<Profiler*> active_profilers = [] {
-        std::vector<Profiler*> profilers;
-        profilers.reserve(16);
-        return profilers;
-    }();
+    ThreadProfileData* m_thread_data;
+    uint32_t m_zone_index;
+    uint32_t m_parent_index;
+    uint64_t m_start_tsc;
+    bool m_ended = false;
 };
+
+// ----------------------------------------------------------------------------
+// Macros
+// ----------------------------------------------------------------------------
+#define PROF_CONCAT_IMPL(x, y) x##y
+#define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
+// The static index guarantees allocate_zone() is only called once per block of code.
+// No strings are hashed, no maps are checked during the hot path.
+#define BEGIN_PROF_NAMED(identifier, label)                                                        \
+    static uint32_t PROF_CONCAT(prof_zone_, identifier) = 0;                                       \
+    if (PROF_CONCAT(prof_zone_, identifier) == 0) {                                                \
+        PROF_CONCAT(prof_zone_, identifier) = profiler::allocate_zone(label);                      \
+    }                                                                                              \
+    profiler::ScopedProfile PROF_CONCAT(profiler_, identifier)(PROF_CONCAT(prof_zone_, identifier))
+
+#define BEGIN_PROF_TAG(tag) BEGIN_PROF_NAMED(__LINE__, tag)
+#define BEGIN_PROF() BEGIN_PROF_NAMED(__LINE__, __func__)
+#define END_PROF(identifier) PROF_CONCAT(profiler_, identifier).end()
+
+inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_freq()) {
+    if (cpu_timer_freq == 0) {
+        return;
+    }
+    struct AggregatedZone {
+        const char* label;
+        uint64_t total_tsc;
+        int64_t self_tsc;
+        uint64_t hit_count;
+    };
+
+    uint32_t num_zones = g_zone_count.load(std::memory_order_relaxed);
+    uint32_t num_threads = g_thread_count.load(std::memory_order_relaxed);
+    std::vector<AggregatedZone> results;
+    results.reserve(num_zones);
+    double ms_per_cycle = 1000.0 / static_cast<double>(cpu_timer_freq);
+    uint64_t global_total_tsc = 0;
+
+    // Aggregate across all threads
+    for (uint32_t z = 1; z < num_zones; ++z) {
+        AggregatedZone agg = {
+            .label = g_zone_labels.at(z), .total_tsc = 0, .self_tsc = 0, .hit_count = 0};
+        for (uint32_t t = 0; t < num_threads; ++t) {
+            const ProfileAnchor& a = g_thread_data.at(t).anchors.at(z);
+            agg.total_tsc += a.total_tsc;
+            agg.self_tsc += a.self_tsc;
+            agg.hit_count += a.hit_count;
+        }
+        if (agg.hit_count > 0) {
+            results.push_back(agg);
+            global_total_tsc = std::max(agg.total_tsc, global_total_tsc);
+        }
+    }
+
+    std::ranges::sort(results, [](const AggregatedZone& a, const AggregatedZone& b) {
+        return a.self_tsc > b.self_tsc;
+    });
+
+    std::cout << "\n=== Profiler Report ===\n";
+    std::cout << std::left << std::setw(30) << "Zone Name" << std::right << std::setw(15)
+              << "Self Time" << std::setw(15) << "Total Time" << std::setw(12) << "Calls" << "\n";
+    std::cout << std::string(72, '-') << "\n";
+
+    for (const auto& r : results) {
+        double self_ms = static_cast<double>(r.self_tsc) * ms_per_cycle;
+        double total_ms = static_cast<double>(r.total_tsc) * ms_per_cycle;
+
+        std::cout << std::left << std::setw(30) << r.label << std::right << std::setw(11)
+                  << std::fixed << std::setprecision(3) << self_ms << " ms" << std::setw(11)
+                  << total_ms << " ms" << std::setw(12) << r.hit_count << "\n";
+    }
+    std::cout << std::string(72, '-') << "\n";
+}
 
 } // namespace profiler
