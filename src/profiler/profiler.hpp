@@ -1,13 +1,18 @@
 #pragma once
 
+#include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <mutex>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <sys/time.h>
 #include <utility>
+#include <vector>
 
 namespace profiler {
 
@@ -55,42 +60,110 @@ inline uint64_t estimate_cpu_timer_freq() {
 
 #define PROF_CONCAT_IMPL(x, y) x##y
 #define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
-#define BEGIN_PROF_TAG(tag) profiler::Profiler PROF_CONCAT(profiler_, __LINE__)(tag)
+#define BEGIN_PROF_TAG(tag) BEGIN_PROF_TAG_IMPL(tag, __LINE__)
+#define BEGIN_PROF_TAG_IMPL(tag, line)                                                             \
+    static thread_local profiler::ProfileNodeCache PROF_CONCAT(profile_node_cache_, line);         \
+    profiler::Profiler PROF_CONCAT(profiler_, line)(tag, PROF_CONCAT(profile_node_cache_, line))
 #define BEGIN_PROF() BEGIN_PROF_TAG(__func__)
-#define BEGIN_PROF_NAMED(identifier, tag) profiler::Profiler PROF_CONCAT(profiler_, identifier)(tag)
+#define BEGIN_PROF_NAMED(identifier, tag)                                                          \
+    static thread_local profiler::ProfileNodeCache PROF_CONCAT(profile_node_cache_, identifier);   \
+    profiler::Profiler PROF_CONCAT(profiler_,                                                      \
+                                   identifier)(tag, PROF_CONCAT(profile_node_cache_, identifier))
 #define END_PROF(identifier) PROF_CONCAT(profiler_, identifier).end()
 
 struct ProfileStats {
-    uint64_t total_cycles = 0;
-    uint64_t call_count = 0;
+    std::atomic<uint64_t> total_cycles = 0;
+    std::atomic<uint64_t> child_cycles = 0;
+    std::atomic<uint64_t> call_count = 0;
+};
+
+struct ProfileNode {
+    std::string_view label;
+    ProfileStats stats;
+    std::map<std::string, ProfileNode, std::less<>> children;
+};
+
+struct ProfileNodeCache {
+    ProfileNode* parent = nullptr;
+    ProfileNode* node = nullptr;
 };
 
 class ProfileRegistry {
   public:
-    void record(std::string_view label, uint64_t elapsed_cycles) {
-        auto& stats = mStats[std::string(label)];
-        stats.total_cycles += elapsed_cycles;
-        ++stats.call_count;
+    ProfileNode* enter(ProfileNode* parent, std::string_view label) {
+        std::lock_guard lock(mMutex);
+        auto& nodes = parent != nullptr ? parent->children : mRoots;
+        auto it = nodes.find(label);
+        if (it == nodes.end()) {
+            it = nodes.try_emplace(std::string(label)).first;
+            it->second.label = it->first;
+        }
+        return &it->second;
     }
 
-    void print_report(std::string_view total_label) const {
-        const auto total_it = mStats.find(std::string(total_label));
-        if (total_it == mStats.end() || total_it->second.total_cycles == 0) {
+    static void record(ProfileNode* node, ProfileNode* parent, uint64_t elapsed_cycles) {
+        node->stats.total_cycles.fetch_add(elapsed_cycles, std::memory_order_relaxed);
+        node->stats.call_count.fetch_add(1, std::memory_order_relaxed);
+        if (parent != nullptr) {
+            parent->stats.child_cycles.fetch_add(elapsed_cycles, std::memory_order_relaxed);
+        }
+    }
+
+    void print_report() const { print_report(estimate_cpu_timer_freq()); }
+
+    void print_report(uint64_t cpu_timer_freq) const {
+        if (cpu_timer_freq == 0) {
             return;
         }
 
-        const auto total_cycles = static_cast<double>(total_it->second.total_cycles);
-        std::cout << "Profile (total: " << total_label << ")\n";
-        for (const auto& [label, stats] : mStats) {
-            const double percent = 100.0 * static_cast<double>(stats.total_cycles) / total_cycles;
-            std::cout << "  " << label << ": " << stats.total_cycles << " (" << std::fixed
-                      << std::setprecision(2) << percent << "%, " << stats.call_count
-                      << " calls)\n";
+        std::lock_guard lock(mMutex);
+        bool printed_header = false;
+        for (const auto& [label, root] : mRoots) {
+            const uint64_t total_cycles = root.stats.total_cycles.load(std::memory_order_relaxed);
+            if (total_cycles == 0) {
+                continue;
+            }
+
+            if (!printed_header) {
+                std::cout << "Profile\n";
+                printed_header = true;
+            }
+            print_node(root, total_cycles, 1, 1000.0 / static_cast<double>(cpu_timer_freq));
         }
     }
 
   private:
-    std::map<std::string, ProfileStats, std::less<>> mStats;
+    static void print_node(const ProfileNode& root, uint64_t report_total, int root_depth,
+                           double milliseconds_per_cycle) {
+        std::vector<std::pair<const ProfileNode*, int>> pending{{&root, root_depth}};
+        while (!pending.empty()) {
+            const auto current = pending.back();
+            pending.pop_back();
+
+            const ProfileNode& node = *current.first;
+            const uint64_t total_cycles = node.stats.total_cycles.load(std::memory_order_relaxed);
+            const uint64_t child_cycles = node.stats.child_cycles.load(std::memory_order_relaxed);
+            const uint64_t self_cycles =
+                total_cycles >= child_cycles ? total_cycles - child_cycles : 0;
+            const uint64_t call_count = node.stats.call_count.load(std::memory_order_relaxed);
+            const double percent =
+                100.0 * static_cast<double>(total_cycles) / static_cast<double>(report_total);
+            const double total_milliseconds = (double)total_cycles * milliseconds_per_cycle;
+            const double self_milliseconds = (double)self_cycles * milliseconds_per_cycle;
+
+            std::cout << std::string(static_cast<size_t>(current.second) * 2, ' ') << node.label
+                      << ": " << std::fixed << std::setprecision(3) << total_milliseconds << " ms ("
+                      << std::setprecision(2) << percent << "% total, " << std::setprecision(3)
+                      << self_milliseconds << " ms self, " << call_count << " calls)\n";
+
+            for (const auto& it : std::ranges::reverse_view(node.children)) {
+                pending.emplace_back(&it.second, current.second + 1);
+            }
+        }
+    }
+
+    mutable std::mutex mMutex;
+    std::map<std::string, ProfileNode, std::less<>> mRoots;
 };
 
 inline ProfileRegistry& profile_registry() {
@@ -98,8 +171,8 @@ inline ProfileRegistry& profile_registry() {
     return registry;
 }
 
-inline void print_profile_report(std::string_view total_label) {
-    profile_registry().print_report(total_label);
+inline void print_profile_report() {
+    profile_registry().print_report();
 }
 
 class Profiler {
@@ -108,24 +181,50 @@ class Profiler {
     Profiler(Profiler&&) = delete;
     Profiler& operator=(const Profiler&) = delete;
     Profiler& operator=(Profiler&&) = delete;
-    Profiler(std::string_view label) : mLabel(label), mBegin(read_cpu_timer()) {}
+    explicit Profiler(std::string_view label) { begin(label, nullptr); }
+    Profiler(std::string_view label, ProfileNodeCache& cache) { begin(label, &cache); }
     ~Profiler() { end(); }
 
     void end() {
         if (mEnded) {
             return;
         }
-
+        assert(!active_profilers.empty() && active_profilers.back() == this &&
+               "profilers must end in reverse construction order");
         uint64_t end = read_cpu_timer();
         uint64_t elapsed = end - mBegin;
-        profile_registry().record(mLabel, elapsed);
+        profiler::ProfileRegistry::record(mNode, mParent != nullptr ? mParent->mNode : nullptr,
+                                          elapsed);
+        active_profilers.pop_back();
         mEnded = true;
     }
 
   private:
-    std::string_view mLabel;
-    uint64_t mBegin;
+    void begin(std::string_view label, ProfileNodeCache* cache) {
+        mParent = active_profilers.empty() ? nullptr : active_profilers.back();
+        ProfileNode* parent_node = mParent != nullptr ? mParent->mNode : nullptr;
+        if (cache != nullptr && cache->parent == parent_node && cache->node != nullptr) {
+            mNode = cache->node;
+        } else {
+            mNode = profile_registry().enter(parent_node, label);
+            if (cache != nullptr) {
+                cache->parent = parent_node;
+                cache->node = mNode;
+            }
+        }
+        mBegin = read_cpu_timer();
+        active_profilers.push_back(this);
+    }
+
+    Profiler* mParent = nullptr;
+    ProfileNode* mNode = nullptr;
+    uint64_t mBegin = 0;
     bool mEnded = false;
+    inline static thread_local std::vector<Profiler*> active_profilers = [] {
+        std::vector<Profiler*> profilers;
+        profilers.reserve(16);
+        return profilers;
+    }();
 };
 
 } // namespace profiler

@@ -184,7 +184,7 @@ int main(int argc, char* argv[]) {
     std::span<char*> command_args = args.subspan(2);
     if (command == "compute") {
         const int result = cmd_compute(command_args, program);
-        profiler::print_profile_report("cmd_compute");
+        profiler::print_profile_report();
         return result;
     }
     if (command == "generate") {
