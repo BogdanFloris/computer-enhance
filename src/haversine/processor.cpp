@@ -11,6 +11,7 @@
 namespace haversine {
 
 std::optional<std::vector<f64>> read_answers(const std::string& path) {
+    BEGIN_PROF();
     std::ifstream in{path, std::ios::binary};
     if (!in.is_open()) {
         return std::nullopt;

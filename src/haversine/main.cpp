@@ -75,6 +75,7 @@ void print_time_elapsed(char const* label, uint64_t total_tsce_elapsed, uint64_t
 }
 
 int cmd_generate(std::span<char*> args, std::string_view program) {
+    BEGIN_PROF();
     if (args.size() < 3) {
         print_generate_usage(program);
         return 1;
@@ -146,7 +147,14 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
     END_PROF(read_file);
 
     std::vector<haversine::Pair> pairs;
-    const char* parse_error = parse_error_message(haversine::parse_input(buf.str(), pairs));
+    haversine::ParseStatus status{};
+    {
+        // Scoped so the buf.str() temporary is still charged here: this zone's self time is
+        // the full copy of the file buffer into a std::string, parse_input is its child.
+        BEGIN_PROF_TAG("parse_json");
+        status = haversine::parse_input(buf.str(), pairs);
+    }
+    const char* parse_error = parse_error_message(status);
     if (parse_error != nullptr) {
         std::cerr << "error: " << parse_error << "\n";
         return 1;
@@ -189,7 +197,9 @@ int main(int argc, char* argv[]) {
         return result;
     }
     if (command == "generate") {
-        return cmd_generate(command_args, program);
+        const int result = cmd_generate(command_args, program);
+        profiler::end_and_report();
+        return result;
     }
     std::cerr << "error: invalid command '" << command << "'\n";
     return 1;

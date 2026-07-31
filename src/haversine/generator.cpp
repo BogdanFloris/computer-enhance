@@ -1,6 +1,7 @@
 #include "generator.hpp"
 
 #include "haversine.hpp"
+#include "profiler.hpp"
 
 #include <algorithm>
 #include <array>
@@ -91,6 +92,7 @@ std::optional<Method> method_from_string(std::string_view name) {
 
 GenerateResult generate(const GenerateParams& params, const std::string& json_path,
                         const std::string& answers_path) {
+    BEGIN_PROF();
     std::ofstream json{json_path};
     if (!json) {
         throw std::runtime_error("failed to open JSON output file: " + json_path);

@@ -175,8 +175,14 @@ class ScopedProfile {
 
 // Closes the span opened by begin_profile() and prints the report. With PROFILER=0 only the
 // total line is printed, and the only profiling cost is the two read_cpu_timer() calls.
-inline void end_and_report(uint64_t cpu_timer_freq = estimate_cpu_timer_freq()) {
+// cpu_timer_freq defaults to 0, meaning "calibrate here". Calibration must happen *after*
+// end_tsc is captured, otherwise its 100ms busy-wait lands inside the measured span --
+// which a default argument would do, since those are evaluated at the call site.
+inline void end_and_report(uint64_t cpu_timer_freq = 0) {
     uint64_t end_tsc = read_cpu_timer();
+    if (cpu_timer_freq == 0) {
+        cpu_timer_freq = estimate_cpu_timer_freq();
+    }
     if (cpu_timer_freq == 0) {
         return;
     }
