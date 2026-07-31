@@ -1,20 +1,25 @@
 #pragma once
 
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <cassert>
+#ifndef PROFILER
+#define PROFILER 1
+#endif
+
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <sys/time.h>
+
+#if PROFILER
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cassert>
 #include <vector>
+#endif
 
 namespace profiler {
 
 constexpr uint64_t os_timer_freq = 1000000;
-constexpr size_t max_profile_zones = 4096;
-constexpr size_t max_profile_threads = 64;
 
 inline uint64_t read_os_timer() {
     timeval val{};
@@ -51,6 +56,16 @@ inline uint64_t estimate_cpu_timer_freq() {
     uint64_t cpu_elapsed = cpu_end - cpu_start;
     return (os_elapsed != 0) ? (os_timer_freq * cpu_elapsed / os_elapsed) : 0;
 }
+
+inline uint64_t g_start_tsc = 0;
+inline void begin_profile() {
+    g_start_tsc = read_cpu_timer();
+}
+
+#if PROFILER
+
+constexpr size_t max_profile_zones = 4096;
+constexpr size_t max_profile_threads = 64;
 
 struct ProfileAnchor {
     uint64_t total_tsc = 0; // Inclusive time
@@ -133,13 +148,14 @@ class ScopedProfile {
     bool m_ended = false;
 };
 
+#endif // PROFILER
+
 // ----------------------------------------------------------------------------
 // Macros
 // ----------------------------------------------------------------------------
+#if PROFILER
 #define PROF_CONCAT_IMPL(x, y) x##y
 #define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
-// The static index guarantees allocate_zone() is only called once per block of code.
-// No strings are hashed, no maps are checked during the hot path.
 #define BEGIN_PROF_NAMED(identifier, label)                                                        \
     static uint32_t PROF_CONCAT(prof_zone_, identifier) = 0;                                       \
     if (PROF_CONCAT(prof_zone_, identifier) == 0) {                                                \
@@ -150,11 +166,31 @@ class ScopedProfile {
 #define BEGIN_PROF_TAG(tag) BEGIN_PROF_NAMED(__LINE__, tag)
 #define BEGIN_PROF() BEGIN_PROF_NAMED(__LINE__, __func__)
 #define END_PROF(identifier) PROF_CONCAT(profiler_, identifier).end()
+#else
+#define BEGIN_PROF_NAMED(identifier, label) (void)0
+#define BEGIN_PROF_TAG(tag) (void)0
+#define BEGIN_PROF() (void)0
+#define END_PROF(identifier) (void)0
+#endif // PROFILER
 
-inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_freq()) {
+// Closes the span opened by begin_profile() and prints the report. With PROFILER=0 only the
+// total line is printed, and the only profiling cost is the two read_cpu_timer() calls.
+inline void end_and_report(uint64_t cpu_timer_freq = estimate_cpu_timer_freq()) {
+    uint64_t end_tsc = read_cpu_timer();
     if (cpu_timer_freq == 0) {
         return;
     }
+    uint64_t total_tsc = end_tsc - g_start_tsc;
+    double ms_per_cycle = 1000.0 / static_cast<double>(cpu_timer_freq);
+
+    std::cout << "\n=== Profiler Report ===\n";
+
+#if PROFILER
+    // Percentages are relative to the whole measured run, so they do not sum to 100%:
+    // the remainder is code that is not covered by any zone.
+    double percent_per_cycle = (total_tsc > 0) ? 100.0 / static_cast<double>(total_tsc) : 0.0;
+    constexpr int table_width = 87;
+
     struct AggregatedZone {
         const char* label;
         uint64_t total_tsc;
@@ -166,9 +202,6 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
     uint32_t num_threads = g_thread_count.load(std::memory_order_relaxed);
     std::vector<AggregatedZone> results;
     results.reserve(num_zones);
-    double ms_per_cycle = 1000.0 / static_cast<double>(cpu_timer_freq);
-    // Self times are exclusive, so summing them covers the measured span exactly once.
-    int64_t global_total_tsc = 0;
 
     // Aggregate across all threads
     for (uint32_t z = 1; z < num_zones; ++z) {
@@ -182,7 +215,6 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
         }
         if (agg.hit_count > 0) {
             results.push_back(agg);
-            global_total_tsc += agg.self_tsc;
         }
     }
 
@@ -190,11 +222,6 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
         return a.self_tsc > b.self_tsc;
     });
 
-    constexpr int table_width = 87;
-    double percent_per_cycle =
-        (global_total_tsc > 0) ? 100.0 / static_cast<double>(global_total_tsc) : 0.0;
-
-    std::cout << "\n=== Profiler Report ===\n";
     std::cout << std::left << std::setw(30) << "Zone Name" << std::right << std::setw(14)
               << "Self Time" << std::setw(9) << "Self %" << std::setw(14) << "Total Time"
               << std::setw(9) << "Total %" << std::setw(11) << "Calls" << "\n";
@@ -215,9 +242,10 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
                   << "\n";
     }
     std::cout << std::string(table_width, '-') << "\n";
-    std::cout << std::left << std::setw(30) << "Total" << std::right << std::setw(11)
-              << std::setprecision(3) << static_cast<double>(global_total_tsc) * ms_per_cycle
-              << " ms\n";
+#endif // PROFILER
+
+    std::cout << std::fixed << std::left << std::setw(30) << "Total" << std::right << std::setw(11)
+              << std::setprecision(3) << static_cast<double>(total_tsc) * ms_per_cycle << " ms\n";
 }
 
 } // namespace profiler

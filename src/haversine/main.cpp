@@ -172,6 +172,7 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    profiler::begin_profile();
     std::span<char*> args{argv, static_cast<size_t>(argc)};
     std::string_view program = !args.empty() ? args[0] : "haversine";
 
@@ -184,7 +185,7 @@ int main(int argc, char* argv[]) {
     std::span<char*> command_args = args.subspan(2);
     if (command == "compute") {
         const int result = cmd_compute(command_args, program);
-        profiler::print_profile_report();
+        profiler::end_and_report();
         return result;
     }
     if (command == "generate") {

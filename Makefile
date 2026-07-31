@@ -1,6 +1,8 @@
 # Architecture: native (arm64) or x86_64 via Rosetta 2
 ARCH       ?= native
 BUILD_TYPE ?= Debug
+# PROFILER=0 compiles the per-zone profiler out; only the total run time is measured.
+PROFILER   ?= 1
 
 ifeq ($(ARCH),x86)
   CMAKE_EXTRA := -DCMAKE_OSX_ARCHITECTURES=x86_64
@@ -10,8 +12,14 @@ else
   ARCH_PREFIX :=
 endif
 
+ifeq ($(PROFILER),0)
+  PROF_SUFFIX := -noprof
+else
+  PROF_SUFFIX :=
+endif
+
 TYPE_LOWER := $(shell echo $(BUILD_TYPE) | tr A-Z a-z)
-BUILD_DIR  := build/$(ARCH_PREFIX)$(TYPE_LOWER)
+BUILD_DIR  := build/$(ARCH_PREFIX)$(TYPE_LOWER)$(PROF_SUFFIX)
 
 .PHONY: configure build release clean sim8086 haversine test
 
@@ -19,6 +27,7 @@ configure:
 	cmake -S . -B $(BUILD_DIR) -G Ninja \
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DPROFILER=$(PROFILER) \
 		$(CMAKE_EXTRA)
 
 build: configure
