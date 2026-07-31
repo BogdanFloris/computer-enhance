@@ -167,7 +167,8 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
     std::vector<AggregatedZone> results;
     results.reserve(num_zones);
     double ms_per_cycle = 1000.0 / static_cast<double>(cpu_timer_freq);
-    uint64_t global_total_tsc = 0;
+    // Self times are exclusive, so summing them covers the measured span exactly once.
+    int64_t global_total_tsc = 0;
 
     // Aggregate across all threads
     for (uint32_t z = 1; z < num_zones; ++z) {
@@ -181,7 +182,7 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
         }
         if (agg.hit_count > 0) {
             results.push_back(agg);
-            global_total_tsc = std::max(agg.total_tsc, global_total_tsc);
+            global_total_tsc += agg.self_tsc;
         }
     }
 
@@ -189,20 +190,34 @@ inline void print_profile_report(uint64_t cpu_timer_freq = estimate_cpu_timer_fr
         return a.self_tsc > b.self_tsc;
     });
 
-    std::cout << "\n=== Profiler Report ===\n";
-    std::cout << std::left << std::setw(30) << "Zone Name" << std::right << std::setw(15)
-              << "Self Time" << std::setw(15) << "Total Time" << std::setw(12) << "Calls" << "\n";
-    std::cout << std::string(72, '-') << "\n";
+    constexpr int table_width = 87;
+    double percent_per_cycle =
+        (global_total_tsc > 0) ? 100.0 / static_cast<double>(global_total_tsc) : 0.0;
 
+    std::cout << "\n=== Profiler Report ===\n";
+    std::cout << std::left << std::setw(30) << "Zone Name" << std::right << std::setw(14)
+              << "Self Time" << std::setw(9) << "Self %" << std::setw(14) << "Total Time"
+              << std::setw(9) << "Total %" << std::setw(11) << "Calls" << "\n";
+    std::cout << std::string(table_width, '-') << "\n";
+
+    std::cout << std::fixed;
     for (const auto& r : results) {
         double self_ms = static_cast<double>(r.self_tsc) * ms_per_cycle;
         double total_ms = static_cast<double>(r.total_tsc) * ms_per_cycle;
+        double self_pct = static_cast<double>(r.self_tsc) * percent_per_cycle;
+        double total_pct = static_cast<double>(r.total_tsc) * percent_per_cycle;
 
         std::cout << std::left << std::setw(30) << r.label << std::right << std::setw(11)
-                  << std::fixed << std::setprecision(3) << self_ms << " ms" << std::setw(11)
-                  << total_ms << " ms" << std::setw(12) << r.hit_count << "\n";
+                  << std::setprecision(3) << self_ms << " ms" << std::setw(8)
+                  << std::setprecision(2) << self_pct << "%" << std::setw(11)
+                  << std::setprecision(3) << total_ms << " ms" << std::setw(8)
+                  << std::setprecision(2) << total_pct << "%" << std::setw(11) << r.hit_count
+                  << "\n";
     }
-    std::cout << std::string(72, '-') << "\n";
+    std::cout << std::string(table_width, '-') << "\n";
+    std::cout << std::left << std::setw(30) << "Total" << std::right << std::setw(11)
+              << std::setprecision(3) << static_cast<double>(global_total_tsc) * ms_per_cycle
+              << " ms\n";
 }
 
 } // namespace profiler
