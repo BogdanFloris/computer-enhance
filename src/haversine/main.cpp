@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -13,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -136,7 +138,9 @@ int cmd_compute(std::span<char*> args, std::string_view program) {
         return 1;
     }
 
-    BEGIN_PROF_NAMED(read_file, "read_file");
+    std::error_code size_ec;
+    uintmax_t file_size = std::filesystem::file_size(args[0], size_ec);
+    BEGIN_PROF_NAMED_BW(read_file, "read_file", size_ec ? 0 : file_size);
     std::ifstream input{args[0]};
     if (!input.is_open()) {
         std::cerr << "error: could not open " << args[0] << "\n";

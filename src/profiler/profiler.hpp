@@ -71,6 +71,7 @@ struct ProfileAnchor {
     uint64_t total_tsc = 0; // Inclusive time
     int64_t self_tsc = 0;   // Exclusive time
     uint64_t hit_count = 0;
+    uint64_t processed_bytes = 0;
     uint32_t active_count = 0; // Used to prevent overcounting total time during recursion
 };
 
@@ -107,11 +108,12 @@ class ScopedProfile {
     ScopedProfile(const ScopedProfile&) = delete;
     ScopedProfile& operator=(const ScopedProfile&) = delete;
 
-    explicit ScopedProfile(uint32_t zone_index)
+    explicit ScopedProfile(uint32_t zone_index, uint64_t byte_count)
         : m_thread_data(get_thread_data()), m_zone_index(zone_index),
           m_parent_index(m_thread_data->parent_index), m_start_tsc(read_cpu_timer()) {
         m_thread_data->parent_index = zone_index;
         m_thread_data->anchors.at(m_zone_index).active_count++;
+        m_thread_data->anchors.at(m_zone_index).processed_bytes += byte_count;
     }
 
     ~ScopedProfile() { end(); }
@@ -156,19 +158,26 @@ class ScopedProfile {
 #if PROFILER
 #define PROF_CONCAT_IMPL(x, y) x##y
 #define PROF_CONCAT(x, y) PROF_CONCAT_IMPL(x, y)
-#define BEGIN_PROF_NAMED(identifier, label)                                                        \
+#define BEGIN_PROF_NAMED_BW(identifier, label, byte_count)                                         \
     static uint32_t PROF_CONCAT(prof_zone_, identifier) = 0;                                       \
     if (PROF_CONCAT(prof_zone_, identifier) == 0) {                                                \
         PROF_CONCAT(prof_zone_, identifier) = profiler::allocate_zone(label);                      \
     }                                                                                              \
-    profiler::ScopedProfile PROF_CONCAT(profiler_, identifier)(PROF_CONCAT(prof_zone_, identifier))
+    profiler::ScopedProfile PROF_CONCAT(profiler_, identifier)(                                    \
+        PROF_CONCAT(prof_zone_, identifier), (byte_count))
 
+#define BEGIN_PROF_NAMED(identifier, label) BEGIN_PROF_NAMED_BW(identifier, label, 0)
+#define BEGIN_PROF_TAG_BW(tag, byte_count) BEGIN_PROF_NAMED_BW(__LINE__, tag, byte_count)
 #define BEGIN_PROF_TAG(tag) BEGIN_PROF_NAMED(__LINE__, tag)
+#define BEGIN_PROF_BW(byte_count) BEGIN_PROF_NAMED_BW(__LINE__, __func__, byte_count)
 #define BEGIN_PROF() BEGIN_PROF_NAMED(__LINE__, __func__)
 #define END_PROF(identifier) PROF_CONCAT(profiler_, identifier).end()
 #else
+#define BEGIN_PROF_NAMED_BW(identifier, label, byte_count) (void)sizeof(byte_count)
 #define BEGIN_PROF_NAMED(identifier, label) (void)0
+#define BEGIN_PROF_TAG_BW(tag, byte_count) (void)sizeof(byte_count)
 #define BEGIN_PROF_TAG(tag) (void)0
+#define BEGIN_PROF_BW(byte_count) (void)sizeof(byte_count)
 #define BEGIN_PROF() (void)0
 #define END_PROF(identifier) (void)0
 #endif // PROFILER
@@ -196,12 +205,16 @@ inline void end_and_report(uint64_t cpu_timer_freq = 0) {
     // the remainder is code that is not covered by any zone.
     double percent_per_cycle = (total_tsc > 0) ? 100.0 / static_cast<double>(total_tsc) : 0.0;
     constexpr int table_width = 87;
+    constexpr int bandwidth_width = 27;
+    constexpr double megabyte = 1024.0 * 1024.0;
+    constexpr double gigabyte = megabyte * 1024.0;
 
     struct AggregatedZone {
         const char* label;
         uint64_t total_tsc;
         int64_t self_tsc;
         uint64_t hit_count;
+        uint64_t processed_bytes;
     };
 
     uint32_t num_zones = g_zone_count.load(std::memory_order_relaxed);
@@ -210,16 +223,22 @@ inline void end_and_report(uint64_t cpu_timer_freq = 0) {
     results.reserve(num_zones);
 
     // Aggregate across all threads
+    bool any_bytes = false;
     for (uint32_t z = 1; z < num_zones; ++z) {
-        AggregatedZone agg = {
-            .label = g_zone_labels.at(z), .total_tsc = 0, .self_tsc = 0, .hit_count = 0};
+        AggregatedZone agg = {.label = g_zone_labels.at(z),
+                              .total_tsc = 0,
+                              .self_tsc = 0,
+                              .hit_count = 0,
+                              .processed_bytes = 0};
         for (uint32_t t = 0; t < num_threads; ++t) {
             const ProfileAnchor& a = g_thread_data.at(t).anchors.at(z);
             agg.total_tsc += a.total_tsc;
             agg.self_tsc += a.self_tsc;
             agg.hit_count += a.hit_count;
+            agg.processed_bytes += a.processed_bytes;
         }
         if (agg.hit_count > 0) {
+            any_bytes = any_bytes || (agg.processed_bytes > 0);
             results.push_back(agg);
         }
     }
@@ -228,10 +247,15 @@ inline void end_and_report(uint64_t cpu_timer_freq = 0) {
         return a.self_tsc > b.self_tsc;
     });
 
+    int full_width = table_width + (any_bytes ? bandwidth_width : 0);
     std::cout << std::left << std::setw(30) << "Zone Name" << std::right << std::setw(14)
               << "Self Time" << std::setw(9) << "Self %" << std::setw(14) << "Total Time"
-              << std::setw(9) << "Total %" << std::setw(11) << "Calls" << "\n";
-    std::cout << std::string(table_width, '-') << "\n";
+              << std::setw(9) << "Total %" << std::setw(11) << "Calls";
+    if (any_bytes) {
+        std::cout << std::setw(13) << "Size" << std::setw(14) << "Bandwidth";
+    }
+    std::cout << "\n";
+    std::cout << std::string(full_width, '-') << "\n";
 
     std::cout << std::fixed;
     for (const auto& r : results) {
@@ -244,10 +268,24 @@ inline void end_and_report(uint64_t cpu_timer_freq = 0) {
                   << std::setprecision(3) << self_ms << " ms" << std::setw(8)
                   << std::setprecision(2) << self_pct << "%" << std::setw(11)
                   << std::setprecision(3) << total_ms << " ms" << std::setw(8)
-                  << std::setprecision(2) << total_pct << "%" << std::setw(11) << r.hit_count
-                  << "\n";
+                  << std::setprecision(2) << total_pct << "%" << std::setw(11) << r.hit_count;
+
+        if (any_bytes) {
+            if (r.processed_bytes > 0) {
+                double seconds =
+                    static_cast<double>(r.total_tsc) / static_cast<double>(cpu_timer_freq);
+                double megabytes = static_cast<double>(r.processed_bytes) / megabyte;
+                double gigabytes = static_cast<double>(r.processed_bytes) / gigabyte;
+                double gb_per_second = (seconds > 0.0) ? gigabytes / seconds : 0.0;
+                std::cout << std::setw(10) << std::setprecision(3) << megabytes << " MB"
+                          << std::setw(9) << std::setprecision(3) << gb_per_second << " GB/s";
+            } else {
+                std::cout << std::setw(13) << "" << std::setw(14) << "";
+            }
+        }
+        std::cout << "\n";
     }
-    std::cout << std::string(table_width, '-') << "\n";
+    std::cout << std::string(full_width, '-') << "\n";
 #endif // PROFILER
 
     std::cout << std::fixed << std::left << std::setw(30) << "Total" << std::right << std::setw(11)

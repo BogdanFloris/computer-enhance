@@ -25,7 +25,7 @@ std::optional<std::vector<f64>> read_answers(const std::string& path) {
 }
 
 ComputeResult evaluate_pairs(const std::vector<Pair>& pairs, const std::vector<f64>* answers) {
-    BEGIN_PROF();
+    BEGIN_PROF_BW(pairs.size() * sizeof(Pair));
     ComputeResult result;
     f64 coeff = 1.0 / static_cast<f64>(pairs.size());
     for (size_t i = 0; i < pairs.size(); ++i) {
