@@ -21,7 +21,7 @@ endif
 TYPE_LOWER := $(shell echo $(BUILD_TYPE) | tr A-Z a-z)
 BUILD_DIR  := build/$(ARCH_PREFIX)$(TYPE_LOWER)$(PROF_SUFFIX)
 
-.PHONY: configure build release clean sim8086 haversine test
+.PHONY: configure build release clean sim8086 haversine repetition_tester test
 
 configure:
 	cmake -S . -B $(BUILD_DIR) -G Ninja \
@@ -43,6 +43,9 @@ sim8086: build
 
 haversine: build
 	./$(BUILD_DIR)/src/haversine/haversine $(ARGS)
+
+repetition_tester: build
+	./$(BUILD_DIR)/src/profiler/repetition_tester $(ARGS)
 
 test: build
 	ctest --test-dir $(BUILD_DIR) --output-on-failure
