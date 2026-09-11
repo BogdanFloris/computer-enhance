@@ -1,13 +1,13 @@
 #pragma once
 
+#include "profiler.hpp"
+
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-
-#ifndef PROFILER
-#define PROFILER 1
-#endif
+#include <optional>
 
 namespace profiler {
 
@@ -32,7 +32,6 @@ struct RepTesterResult {
     uint64_t total_time = 0;
     uint64_t max_time = 0;
     uint64_t min_time = UINT64_MAX;
-    uint64_t avg_time = 0;
 };
 
 inline bool record(RepTesterResult& result, uint64_t elapsed) {
@@ -44,6 +43,24 @@ inline bool record(RepTesterResult& result, uint64_t elapsed) {
     result.max_time = std::max(elapsed, result.max_time);
 
     return new_minimum;
+}
+
+template <typename Test>
+bool run_until_stable(RepTesterResult& result, uint64_t timeout, Test&& test) {
+    uint64_t minimum_found_at = read_cpu_timer();
+
+    while (read_cpu_timer() - minimum_found_at < timeout) {
+        std::optional<uint64_t> elapsed = test();
+        if (!elapsed) {
+            return false;
+        }
+
+        if (record(result, *elapsed)) {
+            minimum_found_at = read_cpu_timer();
+        }
+    }
+
+    return true;
 }
 
 inline void print_stat(uint64_t elapsed, uint64_t cpu_timer_freq, uint64_t byte_count,
