@@ -21,6 +21,9 @@
             nasm
             ninja
             lldb
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            pkgs.perf
+            pkgs.sysstat
           ];
 
           # The nixpkgs lldb has no code-signed `debugserver`, so it can't

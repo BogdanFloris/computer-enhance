@@ -71,7 +71,7 @@ inline void print_stat(uint64_t elapsed, uint64_t cpu_timer_freq, uint64_t byte_
     std::cout << tag << ": " << elapsed << " (" << seconds * 1000 << "ms) " << gbps << "gb/s\n";
 }
 
-inline void print_result(const RepTesterResult& result, const char* fname, uint64_t cpu_timer_freq,
+inline void print_result(const RepTesterResult& result, const std::string& fname, uint64_t cpu_timer_freq,
                          uint64_t byte_count) {
     std::cout << "--- " << fname << " ---\n";
     print_stat(result.min_time, cpu_timer_freq, byte_count, "Min");
