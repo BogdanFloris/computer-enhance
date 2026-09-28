@@ -61,27 +61,37 @@ bool test_fread(const char* path, profiler::Buffer buffer, uint64_t timeout,
     }
 
     profiler::RepTesterResult result{};
-    bool succeeded = profiler::run_until_stable(result, timeout, [&]() -> std::optional<uint64_t> {
-        if (std::fseek(file, 0, SEEK_SET) != 0) {
-            std::cerr << "error: fread seek failed\n";
-            return std::nullopt;
-        }
-        if (!handle_allocation(alloc_type, buffer, buffer.size)) {
-            return std::nullopt;
-        }
+    bool succeeded =
+        profiler::run_until_stable(result, timeout, [&]() -> std::optional<profiler::RepSample> {
+            if (std::fseek(file, 0, SEEK_SET) != 0) {
+                std::cerr << "error: fread seek failed\n";
+                return std::nullopt;
+            }
+            if (!handle_allocation(alloc_type, buffer, buffer.size)) {
+                return std::nullopt;
+            }
 
-        uint64_t start = profiler::read_cpu_timer();
-        size_t bytes_read = std::fread(buffer.data, 1, buffer.size, file);
-        uint64_t elapsed = profiler::read_cpu_timer() - start;
-        handle_deallocation(alloc_type, buffer);
+            auto before = profiler::read_usage();
+            if (!before) {
+                handle_deallocation(alloc_type, buffer);
+                return std::nullopt;
+            }
+            uint64_t start = profiler::read_cpu_timer();
+            size_t bytes_read = std::fread(buffer.data, 1, buffer.size, file);
+            uint64_t elapsed = profiler::read_cpu_timer() - start;
+            auto after = profiler::read_usage();
+            handle_deallocation(alloc_type, buffer);
 
-        if (bytes_read != buffer.size) {
-            std::cerr << "error: fread returned " << bytes_read << " of " << buffer.size
-                      << " bytes\n";
-            return std::nullopt;
-        }
-        return elapsed;
-    });
+            if (!after) {
+                return std::nullopt;
+            }
+            if (bytes_read != buffer.size) {
+                std::cerr << "error: fread returned " << bytes_read << " of " << buffer.size
+                          << " bytes\n";
+                return std::nullopt;
+            }
+            return profiler::make_sample(elapsed, *before, *after);
+        });
 
     std::fclose(file);
     if (succeeded) {
@@ -100,34 +110,44 @@ bool test_read(const char* path, profiler::Buffer buffer, uint64_t timeout, uint
     }
 
     profiler::RepTesterResult result{};
-    bool succeeded = profiler::run_until_stable(result, timeout, [&]() -> std::optional<uint64_t> {
-        if (lseek(file, 0, SEEK_SET) == -1) {
-            std::cerr << "error: read seek failed\n";
-            return std::nullopt;
-        }
-        if (!handle_allocation(alloc_type, buffer, buffer.size)) {
-            return std::nullopt;
-        }
-
-        uint64_t start = profiler::read_cpu_timer();
-        size_t bytes_read = 0;
-        while (bytes_read < buffer.size) {
-            ssize_t read_size = read(file, buffer.data + bytes_read, buffer.size - bytes_read);
-            if (read_size <= 0) {
-                break;
+    bool succeeded =
+        profiler::run_until_stable(result, timeout, [&]() -> std::optional<profiler::RepSample> {
+            if (lseek(file, 0, SEEK_SET) == -1) {
+                std::cerr << "error: read seek failed\n";
+                return std::nullopt;
             }
-            bytes_read += static_cast<size_t>(read_size);
-        }
-        uint64_t elapsed = profiler::read_cpu_timer() - start;
-        handle_deallocation(alloc_type, buffer);
+            if (!handle_allocation(alloc_type, buffer, buffer.size)) {
+                return std::nullopt;
+            }
 
-        if (bytes_read != buffer.size) {
-            std::cerr << "error: read returned " << bytes_read << " of " << buffer.size
-                      << " bytes\n";
-            return std::nullopt;
-        }
-        return elapsed;
-    });
+            auto before = profiler::read_usage();
+            if (!before) {
+                handle_deallocation(alloc_type, buffer);
+                return std::nullopt;
+            }
+            uint64_t start = profiler::read_cpu_timer();
+            size_t bytes_read = 0;
+            while (bytes_read < buffer.size) {
+                ssize_t read_size = read(file, buffer.data + bytes_read, buffer.size - bytes_read);
+                if (read_size <= 0) {
+                    break;
+                }
+                bytes_read += static_cast<size_t>(read_size);
+            }
+            uint64_t elapsed = profiler::read_cpu_timer() - start;
+            auto after = profiler::read_usage();
+            handle_deallocation(alloc_type, buffer);
+
+            if (!after) {
+                return std::nullopt;
+            }
+            if (bytes_read != buffer.size) {
+                std::cerr << "error: read returned " << bytes_read << " of " << buffer.size
+                          << " bytes\n";
+                return std::nullopt;
+            }
+            return profiler::make_sample(elapsed, *before, *after);
+        });
 
     close(file);
     if (succeeded) {
@@ -146,29 +166,40 @@ bool test_ifstream_read(const char* path, profiler::Buffer buffer, uint64_t time
     }
 
     profiler::RepTesterResult result{};
-    bool succeeded = profiler::run_until_stable(result, timeout, [&]() -> std::optional<uint64_t> {
-        input.clear();
-        input.seekg(0, std::ios::beg);
-        if (!input) {
-            std::cerr << "error: ifstream seek failed\n";
-            return std::nullopt;
-        }
-        if (!handle_allocation(alloc_type, buffer, buffer.size)) {
-            return std::nullopt;
-        }
+    bool succeeded =
+        profiler::run_until_stable(result, timeout, [&]() -> std::optional<profiler::RepSample> {
+            input.clear();
+            input.seekg(0, std::ios::beg);
+            if (!input) {
+                std::cerr << "error: ifstream seek failed\n";
+                return std::nullopt;
+            }
+            if (!handle_allocation(alloc_type, buffer, buffer.size)) {
+                return std::nullopt;
+            }
 
-        uint64_t start = profiler::read_cpu_timer();
-        input.read(reinterpret_cast<char*>(buffer.data), static_cast<std::streamsize>(buffer.size));
-        uint64_t elapsed = profiler::read_cpu_timer() - start;
-        handle_deallocation(alloc_type, buffer);
+            auto before = profiler::read_usage();
+            if (!before) {
+                handle_deallocation(alloc_type, buffer);
+                return std::nullopt;
+            }
+            uint64_t start = profiler::read_cpu_timer();
+            input.read(reinterpret_cast<char*>(buffer.data),
+                       static_cast<std::streamsize>(buffer.size));
+            uint64_t elapsed = profiler::read_cpu_timer() - start;
+            auto after = profiler::read_usage();
+            handle_deallocation(alloc_type, buffer);
 
-        if (static_cast<size_t>(input.gcount()) != buffer.size) {
-            std::cerr << "error: ifstream returned " << input.gcount() << " of " << buffer.size
-                      << " bytes\n";
-            return std::nullopt;
-        }
-        return elapsed;
-    });
+            if (!after) {
+                return std::nullopt;
+            }
+            if (static_cast<size_t>(input.gcount()) != buffer.size) {
+                std::cerr << "error: ifstream returned " << input.gcount() << " of " << buffer.size
+                          << " bytes\n";
+                return std::nullopt;
+            }
+            return profiler::make_sample(elapsed, *before, *after);
+        });
 
     if (succeeded) {
         profiler::print_result(result, std::format("ifstream::read{}", alloc_to_str(alloc_type)),
@@ -194,19 +225,29 @@ bool test_mmap_copy(const char* path, profiler::Buffer buffer, uint64_t timeout,
     }
 
     profiler::RepTesterResult result{};
-    bool succeeded = profiler::run_until_stable(result, timeout, [&]() -> std::optional<uint64_t> {
-        if (!handle_allocation(alloc_type, buffer, byte_count)) {
-            return std::nullopt;
-        }
+    bool succeeded =
+        profiler::run_until_stable(result, timeout, [&]() -> std::optional<profiler::RepSample> {
+            if (!handle_allocation(alloc_type, buffer, byte_count)) {
+                return std::nullopt;
+            }
 
-        uint64_t start = profiler::read_cpu_timer();
-        std::memcpy(buffer.data, mapped, buffer.size);
-        // Keep the optimizer from discarding a copy whose result is only benchmark output.
-        asm volatile("" : : "r"(buffer.data) : "memory");
-        uint64_t elapsed = profiler::read_cpu_timer() - start;
-        handle_deallocation(alloc_type, buffer);
-        return elapsed;
-    });
+            auto before = profiler::read_usage();
+            if (!before) {
+                handle_deallocation(alloc_type, buffer);
+                return std::nullopt;
+            }
+            uint64_t start = profiler::read_cpu_timer();
+            std::memcpy(buffer.data, mapped, buffer.size);
+            // Keep the optimizer from discarding a copy whose result is only benchmark output.
+            asm volatile("" : : "r"(buffer.data) : "memory");
+            uint64_t elapsed = profiler::read_cpu_timer() - start;
+            auto after = profiler::read_usage();
+            handle_deallocation(alloc_type, buffer);
+            if (!after) {
+                return std::nullopt;
+            }
+            return profiler::make_sample(elapsed, *before, *after);
+        });
 
     munmap(mapped, byte_count);
     close(file);
@@ -226,27 +267,36 @@ bool test_rdbuf_str(const char* path, size_t byte_count, uint64_t timeout,
     }
 
     profiler::RepTesterResult result{};
-    bool succeeded = profiler::run_until_stable(result, timeout, [&]() -> std::optional<uint64_t> {
-        input.clear();
-        input.seekg(0, std::ios::beg);
-        if (!input) {
-            std::cerr << "error: rdbuf seek failed\n";
-            return std::nullopt;
-        }
+    bool succeeded =
+        profiler::run_until_stable(result, timeout, [&]() -> std::optional<profiler::RepSample> {
+            input.clear();
+            input.seekg(0, std::ios::beg);
+            if (!input) {
+                std::cerr << "error: rdbuf seek failed\n";
+                return std::nullopt;
+            }
 
-        std::stringstream buffer;
-        uint64_t start = profiler::read_cpu_timer();
-        buffer << input.rdbuf();
-        std::string contents = buffer.str();
-        uint64_t elapsed = profiler::read_cpu_timer() - start;
+            std::stringstream buffer;
+            auto before = profiler::read_usage();
+            if (!before) {
+                return std::nullopt;
+            }
+            uint64_t start = profiler::read_cpu_timer();
+            buffer << input.rdbuf();
+            std::string contents = buffer.str();
+            uint64_t elapsed = profiler::read_cpu_timer() - start;
+            auto after = profiler::read_usage();
+            if (!after) {
+                return std::nullopt;
+            }
 
-        if (contents.size() != byte_count) {
-            std::cerr << "error: rdbuf returned " << contents.size() << " of " << byte_count
-                      << " bytes\n";
-            return std::nullopt;
-        }
-        return elapsed;
-    });
+            if (contents.size() != byte_count) {
+                std::cerr << "error: rdbuf returned " << contents.size() << " of " << byte_count
+                          << " bytes\n";
+                return std::nullopt;
+            }
+            return profiler::make_sample(elapsed, *before, *after);
+        });
 
     if (succeeded) {
         profiler::print_result(result, "rdbuf + str", cpu_timer_freq, byte_count);
